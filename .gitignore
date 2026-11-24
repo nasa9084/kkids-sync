@@ -1,0 +1,6 @@
+# PoC output: session cookies, HAR, traces, page dumps. Never commit.
+/.poc/
+*.har
+storage-state*.json
+
+/bin/
