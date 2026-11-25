@@ -1,6 +1,6 @@
 module github.com/nasa9084/kkids-sync
 
-go 1.24.7
+go 1.27.4
 
 require github.com/mxschmitt/playwright-go v0.6401.0
 
