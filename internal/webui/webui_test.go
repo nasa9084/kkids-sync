@@ -198,3 +198,24 @@ func TestAdminViewAs(t *testing.T) {
 		t.Errorf("end view-as: %d", rec.Code)
 	}
 }
+
+func TestSeriesShelfAll(t *testing.T) {
+	_, as := setup(t)
+	mom := as("mom@example.com")
+	rec := do(mom, "GET", "/?q=港町", nil)
+	if !strings.Contains(rec.Body.String(), "/shelf-all") {
+		t.Fatalf("no whole-series button on the book card: %s", rec.Body.String())
+	}
+	// Volume 1 is on the shelf (bootstrap), volume 2 is not.
+	rec = do(mom, "GET", "/series/1", nil)
+	if !strings.Contains(rec.Body.String(), "あと1冊") {
+		t.Fatalf("series page: %s", rec.Body.String())
+	}
+	if rec := do(mom, "POST", "/series/1/shelf-all", map[string]string{"Origin": "http://example.com"}); rec.Code != 303 {
+		t.Fatalf("shelf-all: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(mom, "GET", "/shelf", nil)
+	if !strings.Contains(rec.Body.String(), "港町ミステリー 2") {
+		t.Errorf("volume 2 not on the shelf: %s", rec.Body.String())
+	}
+}

@@ -101,6 +101,7 @@ func (u *UI) Routes(mux *http.ServeMux) {
 	mux.Handle("GET /{$}", family(u.search))
 	mux.Handle("GET /series/{id}", family(u.series))
 	mux.Handle("POST /series/{id}/shelf", family(u.seriesShelf))
+	mux.Handle("POST /series/{id}/shelf-all", family(u.seriesShelfAll))
 	mux.Handle("GET /shelf", family(u.shelf))
 	mux.Handle("POST /books/{asin}/shelf", family(u.shelfOne(true)))
 	mux.Handle("POST /books/{asin}/unshelf", family(u.shelfOne(false)))
@@ -194,6 +195,7 @@ type pageData struct {
 	OnShelfCount int
 	NextThree    []string
 	Rest         []string
+	Missing      int // volumes not on the shelf yet
 	// shelf page
 	Total, Pending int
 }
@@ -280,6 +282,11 @@ func (u *UI) series(w http.ResponseWriter, r *http.Request) {
 			d.Rest = append(d.Rest, b.ASIN)
 		}
 	}
+	for _, b := range books {
+		if !b.OnShelf {
+			d.Missing++
+		}
+	}
 	d.NextThree = d.Rest[:min(3, len(d.Rest))]
 	u.render(w, "series", d)
 }
@@ -300,6 +307,33 @@ func (u *UI) seriesShelf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/series/"+r.PathValue("id"), http.StatusSeeOther)
+}
+
+// seriesShelfAll puts every volume of a series the member can see on their
+// shelf. The server picks the books, so the form carries no list.
+func (u *UI) seriesShelfAll(w http.ResponseWriter, r *http.Request) {
+	m, _ := auth.MemberFrom(r.Context())
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	books, err := u.db.SeriesBooks(r.Context(), m.ID, id)
+	if err != nil {
+		u.fail(w, err)
+		return
+	}
+	var asins []string
+	for _, b := range books {
+		if !b.OnShelf {
+			asins = append(asins, b.ASIN)
+		}
+	}
+	if err := u.db.Select(r.Context(), m.ID, asins...); err != nil {
+		u.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/series/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
 }
 
 func (u *UI) shelf(w http.ResponseWriter, r *http.Request) {

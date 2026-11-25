@@ -42,7 +42,8 @@
   <img class="cover" src="/cover/{{.ASIN}}" alt="" loading="lazy">
   <div class="meta">
     <span class="name">{{short .Title}}</span>
-    {{if .SeriesID}}<a class="sub" href="/series/{{.SeriesID}}">シリーズを見る</a>{{end}}
+    {{if .SeriesID}}<span class="sub"><a href="/series/{{.SeriesID}}">シリーズを見る</a>
+      <form method="post" action="/series/{{.SeriesID}}/shelf-all" class="inline-form" onsubmit="return confirm('「{{.SeriesName}}」を全部本棚に入れますか？')"><button type="submit" class="link-btn">全部入れる</button></form></span>{{end}}
     {{template "status" .}}
   </div>
   {{template "shelf-button" .}}

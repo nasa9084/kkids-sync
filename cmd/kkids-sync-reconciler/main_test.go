@@ -52,3 +52,23 @@ func TestStepsAndQuery(t *testing.T) {
 		t.Errorf("queries = %q", got)
 	}
 }
+
+func TestLimitAdds(t *testing.T) {
+	plan := map[string]store.Diff{
+		"P1": {Add: []string{"a1", "a2", "a3", "a4"}, Remove: []string{"r1"}},
+		"P2": {Add: []string{"b1"}},
+	}
+	out, total, removes, deferred := limitAdds(plan, 3)
+	if total != 4 || removes != 1 || deferred != 2 {
+		t.Fatalf("total=%d removes=%d deferred=%d", total, removes, deferred)
+	}
+	if got := out["P1"].Add; len(got) != 2 || got[0] != "a1" || got[1] != "a2" {
+		t.Errorf("P1 adds = %v", got)
+	}
+	if got := out["P2"].Add; len(got) != 1 {
+		t.Errorf("P2 adds = %v (each profile gets a turn)", got)
+	}
+	if len(out["P1"].Remove) != 1 {
+		t.Error("removal dropped")
+	}
+}

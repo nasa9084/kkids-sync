@@ -80,17 +80,20 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	if err != nil {
 		return err
 	}
-	total := 0
-	for _, d := range plan {
-		total += len(d.Add) + len(d.Remove)
-	}
+	plan, total, removes, deferred := limitAdds(plan, maxChanges)
 	if total == 0 {
 		log.Info("nothing to apply")
 		return nil
 	}
-	if total > maxChanges {
-		report("stopped", fmt.Sprintf("変更が%d件あり、上限%d件を超えたため実行しませんでした", total, maxChanges))
-		return fmt.Errorf("%w: %d planned, limit %d", errTooManyChanges, total, maxChanges)
+	// Many removals at once look like a mistake (or a fresh database), so
+	// they stop the run. Many additions (a whole series) are fine: they are
+	// done maxChanges at a time, the rest on the next runs.
+	if removes > maxChanges {
+		report("stopped", fmt.Sprintf("外す本が%d件あり、上限%d件を超えたため実行しませんでした", removes, maxChanges))
+		return fmt.Errorf("%w: %d removals planned, limit %d", errTooManyChanges, removes, maxChanges)
+	}
+	if deferred > 0 {
+		log.Info("additions spread over runs", "now", total-removes, "later", deferred)
 	}
 	if err := open(); err != nil {
 		report("failed", err.Error())
@@ -144,6 +147,9 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 		res.changed = done
 	}
 	detail := fmt.Sprintf("変更 %d件・すでに反映済み %d件・失敗 %d件", done, skipped, len(failures))
+	if deferred > 0 {
+		detail += fmt.Sprintf("・残り%d件は次回以降", deferred)
+	}
 	if len(failures) > 0 {
 		detail += "\n" + strings.Join(failures, "\n")
 		report("partial", detail)
@@ -152,6 +158,35 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	report("ok", detail)
 	log.Info("applied", "changed", done, "skipped", skipped)
 	return nil
+}
+
+// limitAdds keeps every removal and at most max additions, taken in turn
+// from each profile so that one member's big series does not hold up the
+// others. It returns the trimmed plan, the number of changes in it, how many
+// of them are removals, and how many additions were left for later.
+func limitAdds(plan map[string]store.Diff, max int) (out map[string]store.Diff, total, removes, deferred int) {
+	out = map[string]store.Diff{}
+	profiles := make([]string, 0, len(plan))
+	adds := 0
+	for p, d := range plan {
+		profiles = append(profiles, p)
+		removes += len(d.Remove)
+		adds += len(d.Add)
+		out[p] = store.Diff{Remove: d.Remove, Titles: d.Titles}
+	}
+	sort.Strings(profiles)
+	kept := 0
+	for i := 0; kept < max && kept < adds; i++ {
+		for _, p := range profiles {
+			if i < len(plan[p].Add) && kept < max {
+				d := out[p]
+				d.Add = append(d.Add, plan[p].Add[i])
+				out[p] = d
+				kept++
+			}
+		}
+	}
+	return out, removes + kept, removes, adds - kept
 }
 
 func unlinked(ps []store.Profile) bool {

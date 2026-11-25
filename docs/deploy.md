@@ -25,8 +25,9 @@ profiles, and then refuses the plan (exit code 4): nobody has selected
 anything yet, so it would remove every share. Run `kkids-sync-web bootstrap`
 at that point.
 
-Exit codes: 3 when the Amazon session has expired, 4 when the plan has more
-changes than `-max-changes`. Both also show up in the admin page's job
+Exit codes: 3 when the Amazon session has expired, 4 when the plan would remove more
+books than `-max-changes`. Additions are not refused: at most `-max-changes` are
+made per run and the rest on the next runs. Both codes also show up in the admin page's job
 history.
 
 ## The Amazon session
