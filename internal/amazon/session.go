@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mxschmitt/playwright-go"
@@ -54,11 +55,18 @@ type Options struct {
 	// Headless runs without a window. Off by default: the page should see
 	// an ordinary browser.
 	Headless bool
-	Logger   *slog.Logger
+	// AllowExpectedWrites lets through exactly the write a Toggle call is
+	// waiting for, and nothing else. ReadOnly still blocks every other
+	// state-changing request to the dashboard.
+	AllowExpectedWrites bool
+	Logger              *slog.Logger
 }
 
 // Session is one browser with the owner's Amazon session loaded.
 type Session struct {
+	mu     sync.Mutex
+	expect *expectedWrite
+
 	opts    Options
 	log     *slog.Logger
 	pw      *playwright.Playwright
@@ -100,6 +108,17 @@ func Open(opts Options) (*Session, error) {
 	policy := guard.Policy{ReadOnly: opts.ReadOnly}
 	if err := s.ctx.Route("**/*", func(route playwright.Route) {
 		req := route.Request()
+		if opts.AllowExpectedWrites && req.Method() == "POST" && req.URL() != "" && pathOf(req.URL()) == writePath && hostOf(req.URL()) == dashboardHost {
+			body, _ := req.PostData()
+			if s.writeExpected(body) {
+				log.Info("allowed write", "path", writePath)
+				_ = route.Continue()
+				return
+			}
+			log.Warn("blocked unexpected write", "body", body)
+			_ = route.Abort("blockedbyclient")
+			return
+		}
 		if d, why := policy.Check(req.URL(), req.Method(), req.IsNavigationRequest()); d == guard.Block {
 			log.Warn("blocked request", "method", req.Method(), "url", stripQuery(req.URL()), "reason", why)
 			_ = route.Abort("blockedbyclient")
@@ -385,6 +404,14 @@ func Sleep(ctx context.Context, min, max time.Duration) error {
 	}
 }
 
+func hostOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
 func pathOf(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -399,3 +426,5 @@ func stripQuery(raw string) string {
 	}
 	return raw
 }
+
+func randN(n int) int { return rand.IntN(n) }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/nasa9084/kkids-sync/internal/auth"
 	"github.com/nasa9084/kkids-sync/internal/store"
+	"github.com/nasa9084/kkids-sync/internal/titles"
 )
 
 //go:embed templates/*.html
@@ -62,7 +63,7 @@ type UI struct {
 func New(db Store, coverDir string, log *slog.Logger) (*UI, error) {
 	u := &UI{db: db, log: log, pages: map[string]*template.Template{}, now: time.Now}
 	funcs := template.FuncMap{
-		"short": store.DisplayTitle,
+		"short": titles.DisplayTitle,
 		"askFinished": func(b store.BookView) bool {
 			return !b.SelectedAt.IsZero() && u.now().Sub(b.SelectedAt) > askFinishedAfter
 		},
