@@ -42,7 +42,8 @@ func main() {
 	flag.Parse()
 
 	if *install {
-		if err := playwright.Install(&playwright.RunOptions{Browsers: []string{"chromium"}}); err != nil {
+		// Headful only: skip the headless shell to keep the download small.
+		if err := playwright.Install(&playwright.RunOptions{Browsers: []string{"chromium"}, NoInstallShell: true}); err != nil {
 			log.Fatalf("install: %v", err)
 		}
 		return
