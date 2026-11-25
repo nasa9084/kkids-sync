@@ -10,6 +10,12 @@ state-changing requests to the dashboard.
 - Go 1.24 or later
 - `make`
 
+In `inspect` mode the dashboard's POST requests are blocked unless the
+endpoint name says it only reads data (`/ajax/get-…`, `fetch-`, `list-`,
+`search-`, `load-`, `query-`). Blocked requests are printed as `BLOCKED …`.
+If part of the page fails to load, one of those lines is a read endpoint
+that needs adding to `readOnlyPost` in `internal/guard`.
+
 ## Run
 
 ```sh

@@ -24,6 +24,10 @@ func TestCheck(t *testing.T) {
 		{"outside navigation", rw, "https://example.com/", "GET", true, Block},
 		{"store page navigation", rw, "https://www.amazon.co.jp/dp/B000000000", "GET", true, Allow},
 		{"dashboard post read-only", ro, "https://parents.amazon.co.jp/ajax/update", "POST", false, Block},
+		{"dashboard read post", ro, "https://parents.amazon.co.jp/ajax/get-explore-page-data", "POST", false, Allow},
+		{"dashboard read post other verb", ro, "https://parents.amazon.co.jp/ajax/fetch_items", "POST", false, Allow},
+		{"dashboard write post", ro, "https://parents.amazon.co.jp/ajax/update-content-permission", "POST", false, Block},
+		{"get not at start", ro, "https://parents.amazon.co.jp/ajax/set-target", "POST", false, Block},
 		{"dashboard post read-write", rw, "https://parents.amazon.co.jp/ajax/update", "POST", false, Allow},
 		{"cartography is not cart", rw, "https://www.amazon.co.jp/cartography/x", "GET", true, Allow},
 	}

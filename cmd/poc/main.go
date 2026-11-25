@@ -140,6 +140,7 @@ func run(mode, dir, start string) error {
 	case "inspect":
 		waitEnter("保護者ダッシュボードで、子どもプロフィール → コンテンツ管理 → Amazonコンテンツ(本)の一覧まで開いてください。\n" +
 			"一覧のスクロールやページ送り、検索も試してください(トグルは押しても反映されません)。\n" +
+			"表示が欠けるときは、ターミナルの BLOCKED の行を控えてください。\n" +
 			"終わったら、本の一覧を表示したまま Enter を押してください")
 		if err := dumpPages(ctx, dir, stamp); err != nil {
 			log.Printf("dump pages: %v", err)
