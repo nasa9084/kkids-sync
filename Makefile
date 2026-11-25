@@ -11,7 +11,7 @@ export GOPATH     := $(POC_DIR)/tools/go-path
 
 POC := go run ./cmd/poc -dir $(POC_DIR)
 
-.PHONY: poc-install poc-login poc-inspect poc-clean-tools poc-clean test
+.PHONY: poc-install poc-login poc-inspect poc-inspect-write poc-clean-tools poc-clean test
 
 poc-install:
 	$(POC) -install
@@ -21,6 +21,11 @@ poc-login:
 
 poc-inspect:
 	$(POC) inspect
+
+# Like poc-inspect, but toggles really change what is shared. Each write is
+# saved to .poc/write-*.txt. Turn back anything you change.
+poc-inspect-write:
+	$(POC) -allow-writes inspect
 
 # Remove the downloaded tools and caches, keep session and recordings.
 poc-clean-tools:
