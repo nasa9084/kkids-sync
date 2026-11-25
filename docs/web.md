@@ -43,6 +43,11 @@ name; `member list` shows the result. `apply` does the same on its own when
 a member has a name but no ID yet. `-kids-profile amzn1.account.…` still
 sets the ID directly.
 
+To fix a member later, `member edit -id N` with any of `-name`, `-email`,
+`-role`, `-kids-profile-name` or `-kids-profile` changes just those fields;
+selections stay. A new `-kids-profile-name` clears the ID so it is linked
+again.
+
 `bootstrap` refuses to run twice or before the first sync.
 
 ## Trying it locally
