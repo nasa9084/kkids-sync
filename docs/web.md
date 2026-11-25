@@ -36,3 +36,36 @@ kkids-sync-reconciler -web http://WEB:8081 plan   # should show no changes
 ```
 
 `bootstrap` refuses to run twice or before the first sync.
+
+## Trying it locally
+
+Two terminals, from the repository root (everything stays under `.poc/`):
+
+```sh
+# terminal 1: web in development mode, acting as WEB_EMAIL
+make web-dev WEB_EMAIL=owner@example.com
+
+# terminal 2
+make web-cli ARGS="member add -name 自分 -email owner@example.com -role admin"
+make web-cli ARGS="member add -name 母 -email mom@example.com -kids-profile amzn1.account.…"
+make web-cli ARGS="member add -name 妹 -email sister@example.com -kids-profile amzn1.account.…"
+make reconciler-sync-web          # library and share state into web
+make web-cli ARGS="bootstrap"     # today's shares become selections
+make reconciler-plan              # should show no changes
+```
+
+Open http://127.0.0.1:8080/admin/ as the owner. To see a family page,
+restart `make web-dev WEB_EMAIL=mom@example.com`.
+
+After picking or removing a book as a family member:
+
+```sh
+make reconciler-plan              # what would change
+make reconciler-apply             # change it on the dashboard, then sync
+```
+
+`apply` selects one child through the dashboard's filter, searches each
+book by title and presses its toggle. The guard lets through only the one
+write it expects (that child, that book, that direction) and blocks
+anything else. Plans larger than `MAX_CHANGES` (default 50) are refused
+with exit code 4.

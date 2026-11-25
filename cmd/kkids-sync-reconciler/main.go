@@ -1,12 +1,11 @@
 // Command kkids-sync-reconciler keeps the Amazon Kids profiles in line with
 // what family members picked.
 //
-// So far it can only read:
-//
 //	kkids-sync-reconciler login   sign in by hand and save the session
 //	kkids-sync-reconciler sync    read the library and share state into a JSON snapshot,
 //	                              and send it to kkids-sync-web when -web is set
 //	kkids-sync-reconciler plan    show what kkids-sync-web wants changed (nothing is changed)
+//	kkids-sync-reconciler apply   make those changes on the parent dashboard, then sync
 //
 // The internal API token is read from KKIDS_INTERNAL_TOKEN.
 package main
@@ -34,8 +33,9 @@ func main() {
 	maxPages := flag.Int("max-pages", 60, "sync: give up after this many list pages")
 	full := flag.Bool("full", false, "sync: scroll through the whole library instead of stopping at books already in -out")
 	web := flag.String("web", "", "kkids-sync-web internal API base URL, e.g. http://kkids-sync-web:8081")
+	maxChanges := flag.Int("max-changes", 50, "apply: refuse plans with more changes than this")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: kkids-sync-reconciler [flags] login|sync|plan\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: kkids-sync-reconciler [flags] login|sync|plan|apply\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -66,6 +66,11 @@ func main() {
 		err = syncLibrary(ctx, log, *state, *out, *maxPages, *full, client)
 	case "plan":
 		err = showPlan(ctx, client)
+	case "apply":
+		err = apply(ctx, log, client, *state, *maxChanges)
+		if err == nil {
+			err = syncLibrary(ctx, log, *state, *out, *maxPages, false, client)
+		}
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -74,6 +79,9 @@ func main() {
 		log.Error("failed", "err", err)
 		if errors.Is(err, amazon.ErrSignedOut) {
 			os.Exit(3)
+		}
+		if errors.Is(err, errTooManyChanges) {
+			os.Exit(4)
 		}
 		os.Exit(1)
 	}

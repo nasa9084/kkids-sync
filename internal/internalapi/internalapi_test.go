@@ -43,8 +43,15 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (map[string]store.Diff{"P1": {Remove: []string{"A"}}}); !reflect.DeepEqual(plan, want) {
+	if want := (map[string]store.Diff{"P1": {Remove: []string{"A"}, Titles: map[string]string{"A": "a"}}}); !reflect.DeepEqual(plan, want) {
 		t.Errorf("Plan = %+v, want %+v", plan, want)
+	}
+
+	if err := c.ReportJob(ctx, JobReport{Kind: "apply", Result: "ok", Detail: "追加 1"}); err != nil {
+		t.Errorf("ReportJob: %v", err)
+	}
+	if err := c.ReportJob(ctx, JobReport{}); err == nil {
+		t.Error("empty job report accepted")
 	}
 
 	snap.Complete = false

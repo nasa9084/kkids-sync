@@ -91,7 +91,7 @@ func TestPlanAndBootstrap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (map[string]Diff{"P1": {Remove: []string{"A", "B"}}}); !reflect.DeepEqual(plan, want) {
+	if want := (map[string]Diff{"P1": {Remove: []string{"A", "B"}, Titles: map[string]string{"A": "title A", "B": "title B"}}}); !reflect.DeepEqual(plan, want) {
 		t.Errorf("plan before bootstrap = %+v, want %+v", plan, want)
 	}
 

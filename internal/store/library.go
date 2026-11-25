@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"time"
 )
 
 // Book is a title as the reconciler reports it.
@@ -120,6 +121,9 @@ func (s *Store) ApplySnapshot(ctx context.Context, snap LibrarySnapshot) (Snapsh
 type Diff struct {
 	Add    []string `json:"add"`
 	Remove []string `json:"remove"`
+	// Titles holds the title of every ASIN in Add and Remove; the
+	// reconciler searches the dashboard by title.
+	Titles map[string]string `json:"titles,omitempty"`
 }
 
 // Plan works out, for every family member with a kids profile, which books
@@ -191,9 +195,26 @@ func (s *Store) Plan(ctx context.Context) (map[string]Diff, error) {
 		}
 		sort.Strings(d.Add)
 		sort.Strings(d.Remove)
+		if len(d.Add)+len(d.Remove) > 0 {
+			d.Titles = map[string]string{}
+			for _, a := range append(append([]string(nil), d.Add...), d.Remove...) {
+				var t string
+				if err := s.db.QueryRowContext(ctx, `SELECT title FROM books WHERE asin = ?`, a).Scan(&t); err != nil {
+					return nil, fmt.Errorf("title of %s: %w", a, err)
+				}
+				d.Titles[a] = t
+			}
+		}
 		plan[p] = d
 	}
 	return plan, nil
+}
+
+// AddJob records a job the reconciler ran.
+func (s *Store) AddJob(ctx context.Context, kind, result, detail string, started time.Time) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO jobs (kind, started_at, finished_at, result, detail) VALUES (?, ?, ?, ?, ?)`,
+		kind, started.UTC().Format(time.RFC3339), s.stamp(), result, detail)
+	return err
 }
 
 // BootstrapFromShared turns today's share state into selections, so the

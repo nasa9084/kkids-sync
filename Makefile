@@ -11,7 +11,7 @@ export GOPATH     := $(POC_DIR)/tools/go-path
 
 POC := go run ./cmd/poc -dir $(POC_DIR)
 
-.PHONY: poc-install poc-login poc-inspect poc-inspect-write poc-inspect-steps reconciler-login reconciler-sync reconciler-sync-full poc-clean-tools poc-clean test
+.PHONY: poc-install poc-login poc-inspect poc-inspect-write poc-inspect-steps reconciler-login reconciler-sync reconciler-sync-full web-dev web-cli reconciler-sync-web reconciler-plan reconciler-apply poc-clean-tools poc-clean test
 
 poc-install:
 	$(POC) -install
@@ -45,6 +45,35 @@ reconciler-sync:
 # Scroll through the whole library, e.g. to notice books that left it.
 reconciler-sync-full:
 	$(RECONCILER) -out $(POC_DIR)/snapshot.json -full sync
+
+# Local end-to-end run. web-dev serves http://127.0.0.1:8080 as WEB_EMAIL
+# with the internal API on 127.0.0.1:8081; the reconciler targets below
+# talk to it. Data lives in .poc/web.
+WEB_EMAIL ?= owner@example.com
+export KKIDS_INTERNAL_TOKEN ?= local-dev-token
+WEB := http://127.0.0.1:8081
+
+web-dev:
+	mkdir -p $(POC_DIR)/web
+	KKIDS_DB=$(POC_DIR)/web/kkids-sync.db KKIDS_COVER_DIR=$(POC_DIR)/web/covers \
+	KKIDS_DEV_EMAIL=$(WEB_EMAIL) KKIDS_LISTEN=127.0.0.1:8080 KKIDS_INTERNAL_LISTEN=127.0.0.1:8081 \
+	go run ./cmd/kkids-sync-web serve
+
+reconciler-sync-web:
+	$(RECONCILER) -out $(POC_DIR)/snapshot.json -web $(WEB) sync
+
+reconciler-plan:
+	$(RECONCILER) -web $(WEB) plan
+
+# Runs kkids-sync-web's CLI against the local database, e.g.
+#   make web-cli ARGS="member list"
+web-cli:
+	KKIDS_DB=$(POC_DIR)/web/kkids-sync.db go run ./cmd/kkids-sync-web $(ARGS)
+
+# Changes what is shared. Refuses plans larger than MAX_CHANGES.
+MAX_CHANGES ?= 50
+reconciler-apply:
+	$(RECONCILER) -out $(POC_DIR)/snapshot.json -web $(WEB) -max-changes $(MAX_CHANGES) apply
 
 # Remove the downloaded tools and caches, keep session and recordings.
 poc-clean-tools:
