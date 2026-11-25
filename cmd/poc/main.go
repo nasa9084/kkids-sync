@@ -17,11 +17,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mxschmitt/playwright-go"
@@ -102,12 +105,39 @@ func run(mode, dir, start string) error {
 	}
 
 	rec := newRecorder()
+	captured := &capture{dir: dir, stamp: stamp}
+	if mode == "inspect" {
+		// Keep the bodies of the book-list API so we can see what identifies a
+		// title (ASIN or otherwise) and how paging works. Body() blocks, so it
+		// runs off the event goroutine.
+		ctx.OnResponse(func(resp playwright.Response) {
+			if !captureAPI.MatchString(pathOf(resp.URL())) {
+				return
+			}
+			reqBody, _ := resp.Request().PostData()
+			captured.wg.Add(1)
+			go func() {
+				defer captured.wg.Done()
+				body, err := resp.Body()
+				if err != nil {
+					log.Printf("read body of %s: %v", resp.URL(), err)
+					return
+				}
+				name := strings.TrimPrefix(pathOf(resp.URL()), "/ajax/")
+				captured.save("api-"+name+"-req", reqBody, "json")
+				captured.save("api-"+name+"-resp", string(body), "json")
+			}()
+		})
+	}
 	if err := ctx.Route("**/*", func(route playwright.Route) {
 		req := route.Request()
 		d, why := policy.Check(req.URL(), req.Method(), req.IsNavigationRequest())
 		rec.add(req.Method(), req.ResourceType(), req.URL(), d, why)
 		if d == guard.Block {
 			log.Printf("BLOCKED %s %s (%s)", req.Method(), req.URL(), why)
+			if body, err := req.PostData(); err == nil && body != "" {
+				captured.save("blocked", fmt.Sprintf("%s %s\n\n%s\n", req.Method(), stripQuery(req.URL()), body), "txt")
+			}
 			_ = route.Abort("blockedbyclient")
 			return
 		}
@@ -141,10 +171,12 @@ func run(mode, dir, start string) error {
 		waitEnter("保護者ダッシュボードで、子どもプロフィール → コンテンツ管理 → Amazonコンテンツ(本)の一覧まで開いてください。\n" +
 			"一覧のスクロールやページ送り、検索も試してください(トグルは押しても反映されません)。\n" +
 			"表示が欠けるときは、ターミナルの BLOCKED の行を控えてください。\n" +
+			"トグルを1つだけ押してみてください(送ろうとした内容が blocked-*.txt に残ります)。\n" +
 			"終わったら、本の一覧を表示したまま Enter を押してください")
 		if err := dumpPages(ctx, dir, stamp); err != nil {
 			log.Printf("dump pages: %v", err)
 		}
+		captured.wg.Wait()
 		if err := ctx.Tracing().Stop(tracePath); err != nil {
 			log.Printf("stop tracing: %v", err)
 		}
@@ -241,4 +273,37 @@ func (r *recorder) write(path string) error {
 		fmt.Fprintf(&b, "%d\t%s\n", r.hosts[h], h)
 	}
 	return os.WriteFile(path, []byte(b.String()), 0o600)
+}
+
+// captureAPI matches the dashboard endpoints whose responses are saved.
+var captureAPI = regexp.MustCompile(`^/ajax/(get|search)-additional-content$`)
+
+// capture writes numbered files under the output directory.
+type capture struct {
+	dir, stamp string
+	n          atomic.Int64
+	wg         sync.WaitGroup
+}
+
+func (c *capture) save(kind, content, ext string) {
+	n := c.n.Add(1)
+	path := filepath.Join(c.dir, fmt.Sprintf("%s-%s-%03d.%s", kind, c.stamp, n, ext))
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		log.Printf("write %s: %v", path, err)
+	}
+}
+
+func pathOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Path
+}
+
+func stripQuery(raw string) string {
+	if i := strings.IndexByte(raw, '?'); i >= 0 {
+		return raw[:i]
+	}
+	return raw
 }
