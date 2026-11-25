@@ -1,9 +1,11 @@
 package main
 
 import (
+	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/nasa9084/kkids-sync/internal/amazon"
 	"github.com/nasa9084/kkids-sync/internal/store"
@@ -44,9 +46,12 @@ func TestStepsAndQuery(t *testing.T) {
 		t.Errorf("steps = %v, want %v", got, want)
 	}
 	qs := queries("横浜駅SF(3) (角川コミックス・エース)")
-	wantQ := []string{"横浜駅SF(3)", "横浜駅SF", "横浜駅SF(3) (角川コミックス・エース)"}
+	wantQ := []string{"横浜駅SF(3)", "横浜駅SF", "横浜駅SF(3) (角川コミックス・エース)", "横浜駅SF 3"}
 	if !slices.Equal(qs, wantQ) {
 		t.Errorf("queries = %q, want %q", qs, wantQ)
+	}
+	if got := queries("O/A(3) (角川コミックス・エース)"); got[len(got)-1] != "O A 3" {
+		t.Errorf("words-only query = %q", got)
 	}
 	if got := queries("単発の本"); !slices.Equal(got, []string{"単発の本"}) {
 		t.Errorf("queries = %q", got)
@@ -77,5 +82,34 @@ func TestLimitPlan(t *testing.T) {
 	}
 	if _, total, deferred := limitPlan(plan, 100); total != 8 || deferred != 0 {
 		t.Errorf("all fit: total=%d deferred=%d", total, deferred)
+	}
+}
+
+func TestBackoff(t *testing.T) {
+	b := loadBackoff(filepath.Join(t.TempDir(), "failures.json"))
+	now := time.Date(2026, 11, 25, 20, 0, 0, 0, time.UTC)
+	b.failed("P", "A", now)
+	plan := map[string]store.Diff{"P": {Add: []string{"A", "B"}}}
+	out, held := b.filter(plan, now.Add(30*time.Minute))
+	if held != 1 || len(out["P"].Add) != 1 || out["P"].Add[0] != "B" {
+		t.Errorf("within an hour: held=%d out=%v", held, out)
+	}
+	if _, held := b.filter(plan, now.Add(61*time.Minute)); held != 0 {
+		t.Errorf("after an hour: held=%d", held)
+	}
+	b.failed("P", "A", now)
+	if _, held := b.filter(plan, now.Add(90*time.Minute)); held != 1 {
+		t.Errorf("second failure waits two hours: held=%d", held)
+	}
+	if err := b.save(); err != nil {
+		t.Fatal(err)
+	}
+	if again := loadBackoff(b.path); again.Entries[backoffKey("P", "A")].Failures != 2 {
+		t.Errorf("not saved: %+v", again.Entries)
+	}
+	// No longer planned: forgotten.
+	b.filter(map[string]store.Diff{}, now)
+	if len(b.Entries) != 0 {
+		t.Errorf("stale entries kept: %v", b.Entries)
 	}
 }

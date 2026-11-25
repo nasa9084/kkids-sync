@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/nasa9084/kkids-sync/internal/amazon"
 	"github.com/nasa9084/kkids-sync/internal/internalapi"
@@ -76,9 +77,19 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	if err != nil {
 		return err
 	}
+	bo := loadBackoff(backoffPath(state))
+	defer func() {
+		if err := bo.save(); err != nil {
+			log.Warn("save failures", "err", err)
+		}
+	}()
+	plan, held := bo.filter(plan, time.Now())
+	if held > 0 {
+		log.Info("changes held after earlier failures", "held", held)
+	}
 	plan, total, deferred := limitPlan(plan, maxChanges)
 	if total == 0 {
-		log.Info("nothing to apply")
+		log.Info("nothing to apply", "held", held)
 		return nil
 	}
 	if deferred > 0 {
@@ -119,11 +130,14 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 				}
 				log.Warn("toggle failed", "profile", shortID(profile), "asin", step.asin, "err", err)
 				failures = append(failures, fmt.Sprintf("%s %s: %v", shortID(profile), step.asin, err))
+				bo.failed(profile, step.asin, time.Now())
 			case changed:
 				done++
+				bo.succeeded(profile, step.asin)
 				log.Info("toggled", "profile", shortID(profile), "asin", step.asin, "add", step.add)
 			default:
 				skipped++
+				bo.succeeded(profile, step.asin)
 			}
 			if err := amazon.Sleep(ctx, 3*time.Second, 9*time.Second); err != nil {
 				report("failed", err.Error())
@@ -139,10 +153,16 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	if deferred > 0 {
 		detail += fmt.Sprintf("・残り%d件は次回以降", deferred)
 	}
+	if held > 0 {
+		detail += fmt.Sprintf("・前に失敗した%d件は時間をおいて再試行", held)
+	}
 	if len(failures) > 0 {
+		// Books that fail are retried later (backoff) and listed on the job
+		// page; the run itself did its work, so it does not fail the Job.
 		detail += "\n" + strings.Join(failures, "\n")
 		report("partial", detail)
-		return fmt.Errorf("%d of %d changes failed", len(failures), total)
+		log.Warn("some changes failed", "failed", len(failures), "of", total)
+		return nil
 	}
 	report("ok", detail)
 	log.Info("applied", "changed", done, "skipped", skipped)
@@ -279,11 +299,16 @@ func queries(title string) []string {
 			out = append(out, q)
 		}
 	}
-	add(titles.DisplayTitle(title))
+	display := titles.DisplayTitle(title)
+	add(display)
 	if name, _, ok := titles.ParseSeries(title); ok {
 		add(name)
 	}
 	add(title)
+	// The search finds nothing for some symbols ("O/A(3)"): try words only.
+	add(strings.Join(strings.FieldsFunc(display, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	}), " "))
 	return out
 }
 

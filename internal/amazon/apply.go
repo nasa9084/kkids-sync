@@ -414,8 +414,13 @@ func pressToggle(toggle playwright.Locator) error {
 
 // titleFromSearch waits for the search response and returns the exact
 // title the page uses for asin. The search must be for childID only.
+// maxSearchPages bounds how far a search is scrolled: a long series shows
+// ten volumes per page, ONE PIECE needs more than ten pages.
+const maxSearchPages = 15
+
 func (s *Session) titleFromSearch(ctx context.Context, w *responseWaiter, childID, asin string) (string, error) {
-	for {
+	seen := 0
+	for page := 1; ; page++ {
 		r, err := w.next(ctx)
 		if err != nil {
 			return "", fmt.Errorf("search for %s: %w", asin, err)
@@ -436,6 +441,14 @@ func (s *Session) titleFromSearch(ctx context.Context, w *responseWaiter, childI
 				return it.Title, nil
 			}
 		}
-		return "", fmt.Errorf("%s: %w (%d results)", asin, ErrNotInSearch, len(resp.PurchasedItemsMetadataList))
+		seen += len(resp.PurchasedItemsMetadataList)
+		cursor := resp.ContentTypeToCursorMap[contentTypeEbook]
+		if cursor == "" || cursor == cursorLast || len(resp.PurchasedItemsMetadataList) == 0 || page >= maxSearchPages {
+			return "", fmt.Errorf("%s: %w (%d results)", asin, ErrNotInSearch, seen)
+		}
+		// More results: scroll like a person would, and read the next page.
+		if err := s.scrollToEnd(ctx); err != nil {
+			return "", err
+		}
 	}
 }
