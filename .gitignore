@@ -5,3 +5,6 @@ storage-state*.json
 
 /bin/
 snapshot*.json
+*.db
+*.db-wal
+*.db-shm
