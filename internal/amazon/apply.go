@@ -374,7 +374,7 @@ func (s *Session) Toggle(ctx context.Context, childID, asin, query string, add b
 	defer write.stop()
 	s.setExpect(&expectedWrite{child: childID, status: status, asin: asin})
 	defer s.setExpect(nil)
-	if err := toggle.Click(); err != nil {
+	if err := pressToggle(toggle); err != nil {
 		return false, fmt.Errorf("press toggle: %w", err)
 	}
 	r, err := write.next(ctx)
@@ -398,6 +398,18 @@ func (s *Session) Toggle(ctx context.Context, childID, asin, query string, add b
 			return true, err
 		}
 	}
+}
+
+// pressToggle clicks the card a toggle sits on. The switch itself does not
+// take clicks (its wrapper is "toggle-onclick-disabled" and the card is on
+// top), so a click on the input times out; pressing the card is what a
+// person does.
+func pressToggle(toggle playwright.Locator) error {
+	card := toggle.Locator(`xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " content-card-clickable ")][1]`)
+	if n, _ := card.Count(); n == 1 {
+		return card.Click(playwright.LocatorClickOptions{Timeout: playwright.Float(10000)})
+	}
+	return toggle.Locator("xpath=ancestor::label[1]").Click(playwright.LocatorClickOptions{Timeout: playwright.Float(10000)})
 }
 
 // titleFromSearch waits for the search response and returns the exact
