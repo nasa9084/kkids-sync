@@ -15,6 +15,7 @@
 <section class="panel">
   <div class="toolbar">
     <h2>{{.ShelfOf.Member.Name}} の本棚</h2>
+    <form method="post" action="/admin/view-as/{{.ShelfOf.Member.ID}}" class="inline"><button type="submit">{{.ShelfOf.Member.Name}}さんの画面を見る</button></form>
     <nav class="filters" aria-label="状態で絞り込み">
       {{range .States}}<a href="{{.URL}}" {{if .Current}}aria-current="true"{{end}}>{{.Label}}</a>{{end}}
     </nav>

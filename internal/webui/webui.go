@@ -48,6 +48,7 @@ type Store interface {
 	Select(ctx context.Context, memberID int64, asins ...string) error
 	Unselect(ctx context.Context, memberID int64, asins ...string) error
 	Thumbnail(ctx context.Context, asin string) (string, error)
+	MemberByID(ctx context.Context, id int64) (store.Member, error)
 }
 
 // UI serves the family pages.
@@ -112,7 +113,20 @@ func StaticHandler() http.Handler {
 	return http.FileServerFS(staticFS)
 }
 
-// familyOnly sends admins to their own page and stops cross-site posts.
+// viewAsCookie holds the family member an admin is looking through.
+const viewAsCookie = "hondana_view_as"
+
+type viewingKey struct{}
+
+// viewing reports whether an admin is looking at a family member's pages.
+func viewing(ctx context.Context) bool {
+	v, _ := ctx.Value(viewingKey{}).(bool)
+	return v
+}
+
+// familyOnly sends admins to their own page and stops cross-site posts. An
+// admin who chose "view as" on the admin page sees that member's pages,
+// read-only.
 func (u *UI) familyOnly(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m, ok := auth.MemberFrom(r.Context())
@@ -121,7 +135,17 @@ func (u *UI) familyOnly(next http.HandlerFunc) http.Handler {
 			return
 		}
 		if m.Role != store.RoleFamily {
-			http.Redirect(w, r, "/admin/", http.StatusSeeOther)
+			as, ok := u.viewAs(r)
+			if !ok {
+				http.Redirect(w, r, "/admin/", http.StatusSeeOther)
+				return
+			}
+			if r.Method != http.MethodGet {
+				http.Error(w, "見るだけのモードなので、本棚は変えられません", http.StatusForbidden)
+				return
+			}
+			ctx := context.WithValue(auth.WithMember(r.Context(), as), viewingKey{}, true)
+			next(w, r.WithContext(ctx))
 			return
 		}
 		if r.Method == http.MethodPost && !sameOrigin(r) {
@@ -130,6 +154,23 @@ func (u *UI) familyOnly(next http.HandlerFunc) http.Handler {
 		}
 		next(w, r)
 	})
+}
+
+// viewAs returns the family member named by the admin's view-as cookie.
+func (u *UI) viewAs(r *http.Request) (store.Member, bool) {
+	c, err := r.Cookie(viewAsCookie)
+	if err != nil {
+		return store.Member{}, false
+	}
+	id, err := strconv.ParseInt(c.Value, 10, 64)
+	if err != nil {
+		return store.Member{}, false
+	}
+	m, err := u.db.MemberByID(r.Context(), id)
+	if err != nil || m.Role != store.RoleFamily {
+		return store.Member{}, false
+	}
+	return m, true
 }
 
 // sameOrigin rejects posts from other sites. Browsers send Origin on POST.
@@ -144,6 +185,7 @@ func sameOrigin(r *http.Request) bool {
 
 type pageData struct {
 	Title, Nav, Query string
+	Viewing           bool // an admin looking through "view as"
 	Member            store.Member
 	Books             []store.BookView
 	PrevURL, NextURL  string
@@ -182,7 +224,7 @@ func (u *UI) search(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, err)
 		return
 	}
-	d := pageData{Title: "本をさがす", Nav: "search", Query: q, Member: m}
+	d := pageData{Title: "本をさがす", Nav: "search", Query: q, Member: m, Viewing: viewing(r.Context())}
 	if len(books) > pageSize {
 		books = books[:pageSize]
 		d.NextURL = pageURL(q, page+1)
@@ -224,7 +266,7 @@ func (u *UI) series(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	d := pageData{Title: books[0].SeriesName, Nav: "search", Member: m, Books: books, SeriesID: id}
+	d := pageData{Title: books[0].SeriesName, Nav: "search", Member: m, Books: books, SeriesID: id, Viewing: viewing(r.Context())}
 	// "Next" means the volumes after the last one on the shelf.
 	last := -1
 	for i, b := range books {
@@ -269,7 +311,7 @@ func (u *UI) shelf(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, err)
 		return
 	}
-	d := pageData{Title: "わたしの本棚", Nav: "shelf", Member: m}
+	d := pageData{Title: "わたしの本棚", Nav: "shelf", Member: m, Viewing: viewing(r.Context())}
 	if d.Total, d.Pending, err = u.db.ShelfCounts(r.Context(), m.ID); err != nil {
 		u.fail(w, err)
 		return

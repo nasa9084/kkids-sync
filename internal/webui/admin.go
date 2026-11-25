@@ -84,6 +84,8 @@ func (u *UI) AdminRoutes(mux *http.ServeMux, db AdminStore) {
 	mux.Handle("POST /admin/settings/default", guard(a.globalDefault))
 	mux.Handle("GET /admin/jobs", guard(a.jobs))
 	mux.Handle("GET /admin/shelves", guard(a.shelves))
+	mux.Handle("POST /admin/view-as/{id}", guard(a.viewAsStart))
+	mux.Handle("GET /admin/view-as/end", guard(a.viewAsEnd))
 	mux.Handle("POST /admin/series/{id}/name", guard(a.seriesRename))
 	mux.Handle("POST /admin/series/rules", guard(a.ruleAdd))
 	mux.Handle("POST /admin/series/rules/{id}/delete", guard(a.ruleDelete))
@@ -331,6 +333,23 @@ var shelfStates = []struct {
 	{store.ShelfToRemove, "削除待ち"},
 	{store.ShelfHeld, "非公開で保留"},
 	{store.ShelfShared, "共有中"},
+}
+
+// viewAsStart lets the admin look at a family member's pages (read-only).
+func (a *admin) viewAsStart(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := strconv.ParseInt(id, 10, 64); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: viewAsCookie, Value: id, Path: "/", HttpOnly: true,
+		Secure: r.Header.Get("X-Forwarded-Proto") == "https" || r.TLS != nil, SameSite: http.SameSiteLaxMode})
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (a *admin) viewAsEnd(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: viewAsCookie, Path: "/", MaxAge: -1, HttpOnly: true})
+	http.Redirect(w, r, "/admin/shelves", http.StatusSeeOther)
 }
 
 func shelfURL(member int64, st store.ShelfState, q string, page int) string {
