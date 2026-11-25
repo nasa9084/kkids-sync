@@ -1,6 +1,7 @@
 package amazon
 
 import (
+	"github.com/mxschmitt/playwright-go"
 	"reflect"
 	"testing"
 )
@@ -151,5 +152,16 @@ func TestTailKnown(t *testing.T) {
 	}
 	if !c.tailKnown(map[string]bool{"B000000001": true, "B000000002": true}, 10) {
 		t.Error("tailKnown with every book known")
+	}
+}
+
+func TestHasSignInCookie(t *testing.T) {
+	// What a browser that never signed in holds after opening the dashboard.
+	anon := []playwright.Cookie{{Name: "session-id", Value: "x"}, {Name: "ubid-acbjp", Value: "x"}, {Name: "csm-hit", Value: "x"}}
+	if hasSignInCookie(anon) {
+		t.Error("anonymous cookies counted as signed in")
+	}
+	if !hasSignInCookie(append(anon, playwright.Cookie{Name: "at-acbjp", Value: "x"})) {
+		t.Error("at-acbjp not counted as signed in")
 	}
 }
