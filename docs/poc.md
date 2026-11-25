@@ -63,3 +63,20 @@ go clean -modcache   # note: clears the whole Go module cache, not only this pro
 
 Signing in also leaves a session on Amazon's side. To end it, sign out from
 "Your Account > Login & security" or simply let it expire.
+
+## Reconciler (read-only so far)
+
+`kkids-sync-reconciler` reuses the PoC's tools and saved session:
+
+```sh
+make reconciler-sync   # scroll through the whole book list, write .poc/snapshot.json
+```
+
+It opens the add-content page, scrolls until the list reports its last page,
+and records every book (ASIN, title, thumbnail) and the ASINs shared with each
+child profile, read from the list responses the page receives. It never
+changes anything (`ReadOnly` is always on). Exit code 3 means the session is
+signed out: run `make reconciler-login` and try again.
+
+The share state is only complete for the child profile the dashboard has
+selected (`selected` in the snapshot); switching profiles is not automated yet.

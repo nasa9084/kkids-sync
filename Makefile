@@ -11,7 +11,7 @@ export GOPATH     := $(POC_DIR)/tools/go-path
 
 POC := go run ./cmd/poc -dir $(POC_DIR)
 
-.PHONY: poc-install poc-login poc-inspect poc-inspect-write poc-clean-tools poc-clean test
+.PHONY: poc-install poc-login poc-inspect poc-inspect-write reconciler-login reconciler-sync poc-clean-tools poc-clean test
 
 poc-install:
 	$(POC) -install
@@ -26,6 +26,16 @@ poc-inspect:
 # saved to .poc/write-*.txt. Turn back anything you change.
 poc-inspect-write:
 	$(POC) -allow-writes inspect
+
+# The reconciler shares the PoC's tools and session for now.
+RECONCILER := go run ./cmd/kkids-sync-reconciler -state $(POC_DIR)/storage-state.json
+
+reconciler-login:
+	$(RECONCILER) login
+
+# Read-only: writes the library and share state to .poc/snapshot.json.
+reconciler-sync:
+	$(RECONCILER) -out $(POC_DIR)/snapshot.json sync
 
 # Remove the downloaded tools and caches, keep session and recordings.
 poc-clean-tools:
