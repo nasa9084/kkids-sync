@@ -30,6 +30,8 @@ Output goes to `.poc/`:
 | --- | --- | --- |
 | `page-*.html`, `page-*.png` | DOM and screenshot of each open tab | yes |
 | `requests-*.tsv` | one line per request, query strings removed | yes |
+| `api-*-req.json`, `api-*-resp.json` | request and response bodies of `/ajax/get-additional-content` and `/ajax/search-additional-content` (the book list) | yes |
+| `blocked-*.txt` | body of each blocked write request, e.g. pressing a toggle | yes |
 | `trace-*.zip` | Playwright trace (`go run github.com/mxschmitt/playwright-go/cmd/playwright show-trace`) | only if needed |
 | `network-*.har` | HAR without bodies, **includes cookies** | no |
 | `storage-state.json` | signed-in session, **includes cookies** | no |
