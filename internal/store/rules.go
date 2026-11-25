@@ -138,7 +138,7 @@ func (s *Store) AddRule(ctx context.Context, r SeriesRule) (int, error) {
 		return 0, err
 	}
 	for _, m := range matches {
-		if _, err := tx.ExecContext(ctx, `UPDATE books SET series_id = (SELECT id FROM series WHERE name = ?), series_index = ? WHERE asin = ?`, m.ToSeries, m.ToIndex, m.ASIN); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE books SET series_id = (SELECT id FROM series WHERE name = ?), series_index = ?, series_source = 'rule' WHERE asin = ?`, m.ToSeries, m.ToIndex, m.ASIN); err != nil {
 			return 0, err
 		}
 	}
@@ -193,13 +193,76 @@ func (s *Store) RenameSeries(ctx context.Context, id int64, name string) error {
 	return tx.Commit()
 }
 
-// assignWithRules returns the series and volume for a new book: the first
-// matching rule, else the built-in guess.
-func assignWithRules(rules []SeriesRule, title string) (string, int, bool) {
+// assignWithRules returns the series and volume for a book: the first
+// matching rule (source "rule"), else the built-in guess (source "").
+func assignWithRules(rules []SeriesRule, title string) (name string, vol int, source string, ok bool) {
 	for _, r := range rules {
-		if vol, ok := r.match(title); ok {
-			return r.Series, vol, true
+		if v, ok := r.match(title); ok {
+			return r.Series, v, "rule", true
 		}
 	}
-	return titles.ParseSeries(title)
+	name, vol, ok = titles.ParseSeries(title)
+	return name, vol, "", ok
+}
+
+// Reclassify runs the rules and the built-in guess again over every book
+// whose series was not set by hand, e.g. after the guess has improved. It
+// returns how many books changed series or volume.
+func (s *Store) Reclassify(ctx context.Context) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rules, err := s.seriesRules(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT b.asin, b.title, COALESCE(sr.name, ''), COALESCE(b.series_index, 0)
+		FROM books b LEFT JOIN series sr ON sr.id = b.series_id
+		WHERE COALESCE(b.series_source, '') <> 'manual'`)
+	if err != nil {
+		return 0, err
+	}
+	type change struct {
+		asin, name, source string
+		vol                int
+		ok                 bool
+	}
+	var todo []change
+	for rows.Next() {
+		var asin, title, cur string
+		var curVol int
+		if err := rows.Scan(&asin, &title, &cur, &curVol); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		name, vol, source, ok := assignWithRules(rules, title)
+		if !ok {
+			name, vol = "", 0
+		}
+		if name != cur || vol != curVol {
+			todo = append(todo, change{asin, name, source, vol, ok})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, c := range todo {
+		if !c.ok {
+			if _, err := tx.ExecContext(ctx, `UPDATE books SET series_id = NULL, series_index = NULL, series_source = NULL WHERE asin = ?`, c.asin); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO series (name) VALUES (?) ON CONFLICT (name) DO NOTHING`, c.name); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE books SET series_id = (SELECT id FROM series WHERE name = ?), series_index = ?, series_source = NULLIF(?, '') WHERE asin = ?`, c.name, c.vol, c.source, c.asin); err != nil {
+			return 0, err
+		}
+	}
+	return len(todo), tx.Commit()
 }

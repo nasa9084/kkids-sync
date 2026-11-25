@@ -90,3 +90,30 @@ func TestShelvesRulesAndRename(t *testing.T) {
 		t.Errorf("B after merge = %+v", b)
 	}
 }
+
+func TestReclassifyKeepsManual(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newTestStore(t)
+	if _, err := s.ApplySnapshot(ctx, LibrarySnapshot{
+		Books:    []Book{{ASIN: "M1", Title: "化物語（上）"}, {ASIN: "M2", Title: "猫物語　（白） (講談社ＢＯＸ)"}, {ASIN: "X", Title: "港町ミステリー 4"}},
+		Shared:   map[string][]string{},
+		Complete: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The seeded rule puts both into 物語シリーズ.
+	for _, a := range []string{"M1", "M2"} {
+		if b, _ := s.AdminBook(ctx, a); b.SeriesName != "物語シリーズ" {
+			t.Errorf("%s = %q", a, b.SeriesName)
+		}
+	}
+	if err := s.SetBookSeries(ctx, "X", "手で決めた", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Reclassify(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := s.AdminBook(ctx, "X"); b.SeriesName != "手で決めた" {
+		t.Errorf("manual series changed: %q", b.SeriesName)
+	}
+}

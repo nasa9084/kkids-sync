@@ -158,6 +158,9 @@ func TestAdminSeriesRules(t *testing.T) {
 	if rec := post("/admin/series/rules", "pattern=%5E%E6%B8%AF%E7%94%BA&series=%E6%B8%AF%E7%94%BA&preview=0"); rec.Code != 303 {
 		t.Errorf("save rule: %d %s", rec.Code, rec.Body.String())
 	}
+	if rec := post("/admin/series/reclassify", ""); rec.Code != 303 {
+		t.Errorf("reclassify: %d", rec.Code)
+	}
 	if rec := do(owner, "GET", "/admin/series", nil); !strings.Contains(rec.Body.String(), "<code>^港町</code>") {
 		t.Errorf("rule not listed: %s", rec.Body.String())
 	}

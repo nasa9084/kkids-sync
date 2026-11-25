@@ -29,6 +29,7 @@ type AdminStore interface {
 	AddRule(ctx context.Context, r store.SeriesRule) (int, error)
 	DeleteRule(ctx context.Context, id int64) error
 	RenameSeries(ctx context.Context, id int64, name string) error
+	Reclassify(ctx context.Context) (int, error)
 }
 
 type filterLink struct {
@@ -58,6 +59,7 @@ type adminData struct {
 	RuleError        string
 	Preview          []store.RuleMatch
 	Previewed, Moved bool
+	Reclassified     bool
 	MovedCount       int
 }
 
@@ -85,6 +87,7 @@ func (u *UI) AdminRoutes(mux *http.ServeMux, db AdminStore) {
 	mux.Handle("POST /admin/series/{id}/name", guard(a.seriesRename))
 	mux.Handle("POST /admin/series/rules", guard(a.ruleAdd))
 	mux.Handle("POST /admin/series/rules/{id}/delete", guard(a.ruleDelete))
+	mux.Handle("POST /admin/series/reclassify", guard(a.reclassify))
 }
 
 type admin struct {
@@ -224,6 +227,10 @@ func (a *admin) series(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := adminData{Title: "シリーズ", Nav: "series", Query: q, Member: m, Series: rows, Rules: rules}
+	if n := r.URL.Query().Get("reclassified"); n != "" {
+		d.Reclassified = true
+		d.MovedCount, _ = strconv.Atoi(n)
+	}
 	if n := r.URL.Query().Get("moved"); n != "" {
 		d.Moved = true
 		d.MovedCount, _ = strconv.Atoi(n)
@@ -273,6 +280,15 @@ func (a *admin) ruleAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin/series?moved="+strconv.Itoa(n)+"#rules", http.StatusSeeOther)
+}
+
+func (a *admin) reclassify(w http.ResponseWriter, r *http.Request) {
+	n, err := a.db.Reclassify(r.Context())
+	if err != nil {
+		a.ui.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/series?reclassified="+strconv.Itoa(n)+"#rules", http.StatusSeeOther)
 }
 
 func (a *admin) ruleDelete(w http.ResponseWriter, r *http.Request) {

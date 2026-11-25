@@ -20,6 +20,11 @@
   <h2>シリーズのルール</h2>
   <p class="label">書名(全角英数は半角にそろえたもの)が正規表現に当てはまる本を、指定したシリーズに入れます。上から順に試し、どれにも当てはまらなければ自動の判定を使います。<code>(?P&lt;vol&gt;\d+)</code> の部分が巻数になります(なければ自動の判定の巻数)。保存すると、当てはまる本は手で直したものも含めて移動します。</p>
   {{if .Moved}}<p class="label"><strong>ルールを保存し、{{.MovedCount}}冊を移動しました。</strong></p>{{end}}
+  {{if .Reclassified}}<p class="label"><strong>判定をやり直し、{{.MovedCount}}冊のシリーズ・巻が変わりました。</strong></p>{{end}}
+  <form method="post" action="/admin/series/reclassify" class="inline">
+    <button type="submit">ルールと自動の判定をやり直す</button>
+    <span class="label">本ごとに手で設定したシリーズはそのままです。</span>
+  </form>
   {{if .Rules}}
   <div class="scroll">
   <table>

@@ -17,8 +17,8 @@ func (s *Store) assignSeries(ctx context.Context, q execQuerier) error {
 		return err
 	}
 	type pending struct {
-		asin, name string
-		vol        int
+		asin, name, source string
+		vol                int
 	}
 	var todo []pending
 	for rows.Next() {
@@ -27,8 +27,8 @@ func (s *Store) assignSeries(ctx context.Context, q execQuerier) error {
 			rows.Close()
 			return err
 		}
-		if name, vol, ok := assignWithRules(rules, title); ok {
-			todo = append(todo, pending{asin, name, vol})
+		if name, vol, source, ok := assignWithRules(rules, title); ok {
+			todo = append(todo, pending{asin, name, source, vol})
 		}
 	}
 	rows.Close()
@@ -40,8 +40,8 @@ func (s *Store) assignSeries(ctx context.Context, q execQuerier) error {
 			return err
 		}
 		if _, err := q.ExecContext(ctx, `
-			UPDATE books SET series_id = (SELECT id FROM series WHERE name = ?), series_index = ?
-			WHERE asin = ?`, p.name, p.vol, p.asin); err != nil {
+			UPDATE books SET series_id = (SELECT id FROM series WHERE name = ?), series_index = ?, series_source = NULLIF(?, '')
+			WHERE asin = ?`, p.name, p.vol, p.source, p.asin); err != nil {
 			return err
 		}
 	}

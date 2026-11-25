@@ -195,12 +195,12 @@ func (s *Store) SetBookSeries(ctx context.Context, asin, name string, index int)
 	var r sql.Result
 	if name == "" {
 		// series_index -1 marks "not a series" so assignSeries leaves it alone.
-		r, err = tx.ExecContext(ctx, `UPDATE books SET series_id = NULL, series_index = -1 WHERE asin = ?`, asin)
+		r, err = tx.ExecContext(ctx, `UPDATE books SET series_id = NULL, series_index = -1, series_source = 'manual' WHERE asin = ?`, asin)
 	} else {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO series (name) VALUES (?) ON CONFLICT (name) DO NOTHING`, name); err != nil {
 			return err
 		}
-		r, err = tx.ExecContext(ctx, `UPDATE books SET series_id = (SELECT id FROM series WHERE name = ?), series_index = ? WHERE asin = ?`, name, index, asin)
+		r, err = tx.ExecContext(ctx, `UPDATE books SET series_id = (SELECT id FROM series WHERE name = ?), series_index = ?, series_source = 'manual' WHERE asin = ?`, name, index, asin)
 	}
 	if err != nil {
 		return err
