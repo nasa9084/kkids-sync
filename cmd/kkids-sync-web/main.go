@@ -4,11 +4,14 @@
 //	kkids-sync-web serve                        run the web server
 //	kkids-sync-web member add -name … -email …  register someone who may sign in
 //	kkids-sync-web member list
+//	kkids-sync-web bootstrap                    copy today's share state into selections (first run only)
 //
 // Configuration comes from the environment:
 //
 //	KKIDS_DB                  SQLite file (default kkids-sync.db)
 //	KKIDS_LISTEN              address for family and admin pages (default :8080)
+//	KKIDS_INTERNAL_LISTEN     address for the reconciler's internal API (default :8081)
+//	KKIDS_INTERNAL_TOKEN      bearer token the reconciler must send; the internal API is off without it
 //	KKIDS_ACCESS_TEAM_DOMAIN  Cloudflare Access team domain, e.g. example.cloudflareaccess.com
 //	KKIDS_ACCESS_AUD          Access application audience tag
 //	KKIDS_DEV_EMAIL           skip Access and act as this address (local development only;
@@ -31,6 +34,7 @@ import (
 	"time"
 
 	"github.com/nasa9084/kkids-sync/internal/auth"
+	"github.com/nasa9084/kkids-sync/internal/internalapi"
 	"github.com/nasa9084/kkids-sync/internal/store"
 )
 
@@ -43,7 +47,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: kkids-sync-web serve | member add -name NAME -email EMAIL [-role family|admin] [-kids-profile ID] | member list")
+	return errors.New("usage: kkids-sync-web serve | member add -name NAME -email EMAIL [-role family|admin] [-kids-profile ID] | member list | bootstrap")
 }
 
 func run(log *slog.Logger, args []string, out io.Writer) error {
@@ -62,6 +66,13 @@ func run(log *slog.Logger, args []string, out io.Writer) error {
 	switch args[0] {
 	case "serve":
 		return serve(ctx, log, db)
+	case "bootstrap":
+		n, err := db.BootstrapFromShared(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "selected %d shared books for their members and made them visible\n", n)
+		return nil
 	case "member":
 		if len(args) < 2 {
 			return usage()
@@ -119,23 +130,40 @@ func serve(ctx context.Context, log *slog.Logger, db *store.Store) error {
 	})))
 	mux.Handle("/", auth.Middleware(verifier, db, log)(app))
 
-	srv := &http.Server{
+	servers := []*http.Server{{
 		Addr:              listen,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+	}}
+	if token := os.Getenv("KKIDS_INTERNAL_TOKEN"); token != "" {
+		servers = append(servers, &http.Server{
+			Addr:              envOr("KKIDS_INTERNAL_LISTEN", ":8081"),
+			Handler:           internalapi.Handler(db, token, log),
+			ReadHeaderTimeout: 10 * time.Second,
+		})
+	} else {
+		log.Warn("KKIDS_INTERNAL_TOKEN is not set: the reconciler's internal API is off")
 	}
-	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServe() }()
-	log.Info("listening", "addr", listen)
 
+	errc := make(chan error, len(servers))
+	for _, srv := range servers {
+		go func() { errc <- srv.ListenAndServe() }()
+		log.Info("listening", "addr", srv.Addr)
+	}
+	var err error
 	select {
-	case err := <-errc:
-		return err
+	case err = <-errc:
 	case <-ctx.Done():
 	}
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdown)
+	for _, srv := range servers {
+		err = errors.Join(err, srv.Shutdown(shutdown))
+	}
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
 
 func memberAdd(ctx context.Context, db *store.Store, args []string, out io.Writer) error {

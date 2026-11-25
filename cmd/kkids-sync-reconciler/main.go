@@ -4,7 +4,11 @@
 // So far it can only read:
 //
 //	kkids-sync-reconciler login   sign in by hand and save the session
-//	kkids-sync-reconciler sync    read the library and share state into a JSON snapshot
+//	kkids-sync-reconciler sync    read the library and share state into a JSON snapshot,
+//	                              and send it to kkids-sync-web when -web is set
+//	kkids-sync-reconciler plan    show what kkids-sync-web wants changed (nothing is changed)
+//
+// The internal API token is read from KKIDS_INTERNAL_TOKEN.
 package main
 
 import (
@@ -21,6 +25,7 @@ import (
 	"syscall"
 
 	"github.com/nasa9084/kkids-sync/internal/amazon"
+	"github.com/nasa9084/kkids-sync/internal/internalapi"
 )
 
 func main() {
@@ -28,8 +33,9 @@ func main() {
 	out := flag.String("out", "snapshot.json", "sync: where to write the snapshot")
 	maxPages := flag.Int("max-pages", 60, "sync: give up after this many list pages")
 	full := flag.Bool("full", false, "sync: scroll through the whole library instead of stopping at books already in -out")
+	web := flag.String("web", "", "kkids-sync-web internal API base URL, e.g. http://kkids-sync-web:8081")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: kkids-sync-reconciler [flags] login|sync\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: kkids-sync-reconciler [flags] login|sync|plan\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -42,12 +48,24 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	var client *internalapi.Client
+	if *web != "" {
+		token := os.Getenv("KKIDS_INTERNAL_TOKEN")
+		if token == "" {
+			log.Error("KKIDS_INTERNAL_TOKEN is required with -web")
+			os.Exit(2)
+		}
+		client = &internalapi.Client{BaseURL: *web, Token: token}
+	}
+
 	var err error
 	switch flag.Arg(0) {
 	case "login":
 		err = login(log, *state)
 	case "sync":
-		err = syncLibrary(ctx, log, *state, *out, *maxPages, *full)
+		err = syncLibrary(ctx, log, *state, *out, *maxPages, *full, client)
+	case "plan":
+		err = showPlan(ctx, client)
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -73,7 +91,7 @@ func login(log *slog.Logger, state string) (err error) {
 	})
 }
 
-func syncLibrary(ctx context.Context, log *slog.Logger, state, out string, maxPages int, full bool) (err error) {
+func syncLibrary(ctx context.Context, log *slog.Logger, state, out string, maxPages int, full bool, client *internalapi.Client) (err error) {
 	if _, err := os.Stat(state); err != nil {
 		return fmt.Errorf("%w: no session file at %s (run login first)", amazon.ErrSignedOut, state)
 	}
@@ -125,6 +143,33 @@ func syncLibrary(ctx context.Context, log *slog.Logger, state, out string, maxPa
 			attrs = append(attrs, "shared["+shortID(child)+"]", len(asins))
 		}
 		log.Info("snapshot written", attrs...)
+	}
+	if client != nil {
+		res, err := client.PostSnapshot(ctx, snap)
+		if err != nil {
+			return fmt.Errorf("send snapshot to web: %w", err)
+		}
+		log.Info("snapshot sent to web", "new", res.NewBooks, "removed", res.RemovedBooks, "profiles", res.Profiles)
+	}
+	return nil
+}
+
+func showPlan(ctx context.Context, client *internalapi.Client) error {
+	if client == nil {
+		return errors.New("plan needs -web")
+	}
+	plan, err := client.Plan(ctx)
+	if err != nil {
+		return err
+	}
+	for profile, d := range plan {
+		fmt.Printf("%s: add %d, remove %d\n", shortID(profile), len(d.Add), len(d.Remove))
+		for _, a := range d.Add {
+			fmt.Printf("  + %s\n", a)
+		}
+		for _, a := range d.Remove {
+			fmt.Printf("  - %s\n", a)
+		}
 	}
 	return nil
 }
