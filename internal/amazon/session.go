@@ -30,7 +30,13 @@ const (
 // sign in by hand. Callers must stop, not retry.
 var ErrSignedOut = errors.New("amazon session is signed out")
 
-var listEndpoint = regexp.MustCompile(`^/ajax/get-additional-content$`)
+var (
+	listEndpoint   = regexp.MustCompile(`^/ajax/get-additional-content$`)
+	searchEndpoint = regexp.MustCompile(`^/ajax/search-additional-content$`)
+)
+
+// searchFieldSelector is the dashboard's search box on the add-content page.
+const searchFieldSelector = "#content-management-search-field"
 
 // Options configures a Session.
 type Options struct {
@@ -145,7 +151,14 @@ type ReadLibraryOptions struct {
 	// PageTimeout is how long to wait for the next page after scrolling
 	// (0 = 20s).
 	PageTimeout time.Duration
+	// Known holds ASINs from an earlier sync. When set, paging stops as soon
+	// as the tail of a page is all known, so a normal run reads one page
+	// instead of scrolling through the whole library. Nil reads everything.
+	Known map[string]bool
 }
+
+// knownTail is how many books at the end of a page must be known to stop.
+const knownTail = 10
 
 // ReadLibrary opens the add-content page and scrolls until every book has
 // been loaded, reading the list responses the page receives.
@@ -158,19 +171,29 @@ func (s *Session) ReadLibrary(ctx context.Context, o ReadLibraryOptions) (*Snaps
 	}
 	col := newCollector()
 	pending := make(chan error, 64)
+	searched := make(chan error, 8)
 	handler := func(resp playwright.Response) {
-		if !listEndpoint.MatchString(pathOf(resp.URL())) {
-			return
+		path := pathOf(resp.URL())
+		switch {
+		case listEndpoint.MatchString(path):
+			reqBody, _ := resp.Request().PostData()
+			// Body blocks, so read it off the event goroutine.
+			go func() {
+				body, err := resp.Body()
+				if err == nil {
+					err = col.add([]byte(reqBody), body)
+				}
+				pending <- err
+			}()
+		case searchEndpoint.MatchString(path):
+			go func() {
+				body, err := resp.Body()
+				if err == nil {
+					err = col.addSearch(body)
+				}
+				searched <- err
+			}()
 		}
-		reqBody, _ := resp.Request().PostData()
-		// Body blocks, so read it off the event goroutine.
-		go func() {
-			body, err := resp.Body()
-			if err == nil {
-				err = col.add([]byte(reqBody), body)
-			}
-			pending <- err
-		}()
 	}
 	s.ctx.OnResponse(handler)
 	defer s.ctx.RemoveListener("response", handler)
@@ -194,8 +217,17 @@ func (s *Session) ReadLibrary(ctx context.Context, o ReadLibraryOptions) (*Snaps
 			}
 			pages, cursor := col.progress()
 			s.log.Info("list page", "pages", pages, "cursor", cursor)
-			if cursor == cursorLast {
-				return col.snapshot(), nil
+			incremental := o.Known != nil && cursor != cursorLast && col.tailKnown(o.Known, knownTail)
+			if cursor == cursorLast || incremental {
+				if err := s.searchOnce(ctx, col, searched, o.PageTimeout); err != nil {
+					return col.snapshot(), err
+				}
+				snap := col.snapshot()
+				if incremental {
+					snap.Incremental = true
+					snap.Complete = col.fullSharedState()
+				}
+				return snap, nil
 			}
 			if pages >= o.MaxPages {
 				return col.snapshot(), fmt.Errorf("stopped after %d pages", pages)
@@ -227,6 +259,67 @@ func (s *Session) ReadLibrary(ctx context.Context, o ReadLibraryOptions) (*Snaps
 			}
 		}
 	}
+}
+
+// searchOnce types a short query into the search box. The search response
+// carries the complete share state of every child in view, which list pages
+// do not. The query itself does not matter; a fragment of a real title keeps
+// it looking ordinary.
+func (s *Session) searchOnce(ctx context.Context, col *collector, searched <-chan error, timeout time.Duration) error {
+	snap := col.snapshot()
+	if len(snap.Books) == 0 {
+		return errors.New("no books to search for")
+	}
+	title := []rune(snap.Books[rand.IntN(len(snap.Books))].Title)
+	query := string(title[:min(len(title), 2+rand.IntN(3))])
+
+	field := s.page.Locator(searchFieldSelector)
+	if err := field.Click(); err != nil {
+		return fmt.Errorf("focus search field: %w", err)
+	}
+	if err := Sleep(ctx, 400*time.Millisecond, 1200*time.Millisecond); err != nil {
+		return err
+	}
+	if err := field.PressSequentially(query, playwright.LocatorPressSequentiallyOptions{
+		Delay: playwright.Float(float64(80 + rand.IntN(120))),
+	}); err != nil {
+		return fmt.Errorf("type search query: %w", err)
+	}
+	if err := field.Press("Enter"); err != nil {
+		return fmt.Errorf("submit search: %w", err)
+	}
+
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-searched:
+		if err != nil {
+			return err
+		}
+	case <-t.C:
+		return errors.New("search response did not arrive")
+	}
+	// The search must cover every child the list was loaded for.
+	have := map[string]bool{}
+	for _, c := range col.sharedChildren() {
+		have[c] = true
+	}
+	for _, c := range col.listChildren() {
+		if !have[c] {
+			return fmt.Errorf("search did not return the share state of child …%s", tail(c))
+		}
+	}
+	s.log.Info("share state read from search", "children", len(have))
+	return nil
+}
+
+func tail(id string) string {
+	if len(id) <= 4 {
+		return id
+	}
+	return id[len(id)-4:]
 }
 
 // scrollToEnd scrolls down in a few uneven steps, like a person would.

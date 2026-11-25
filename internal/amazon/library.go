@@ -19,10 +19,13 @@ type Snapshot struct {
 	Books []Book `json:"books"`
 	// Shared maps a child profile ID to the ASINs shared with it.
 	Shared map[string][]string `json:"shared"`
-	// Selected is the child profile the page was showing.
-	Selected string `json:"selected"`
-	// Complete is true when paging reached the end of the list.
+	// Complete is true when paging reached the end of the list and the share
+	// state came from a search response, which carries every shared ASIN.
+	// List pages only carry the share state of their first page.
 	Complete bool `json:"complete"`
+	// Incremental is true when paging stopped early at books already known;
+	// Books then holds only the newest titles.
+	Incremental bool `json:"incremental"`
 }
 
 // listRequest is the body of POST /ajax/get-additional-content.
@@ -54,15 +57,29 @@ const (
 	stateGranted     = "GRANTED"
 )
 
+// searchResponse is the part of POST /ajax/search-additional-content we use.
+// Unlike list pages, it carries the full allowlist of every child in the
+// request, whatever the query.
+type searchResponse struct {
+	ChildIDToAllowlistMap map[string]struct {
+		AllowlistData map[string][]struct {
+			AllowlistStateType string `json:"allowlistStateType"`
+			Identifier         string `json:"identifier"`
+		} `json:"allowlistData"`
+	} `json:"childIdToAllowlistMap"`
+}
+
 // collector accumulates list pages as the browser loads them.
 type collector struct {
-	mu       sync.Mutex
-	books    map[string]Book
-	order    []string
-	shared   map[string]map[string]bool
-	selected string
-	cursor   string // EBOOK cursor from the latest page
-	pages    int
+	mu         sync.Mutex
+	books      map[string]Book
+	order      []string
+	shared     map[string]map[string]bool
+	children   []string // from the first list request
+	fullShared bool     // shared came from a search response
+	cursor     string   // EBOOK cursor from the latest page
+	pages      int
+	lastPage   []string // EBOOK ASINs of the latest page, in list order
 }
 
 func newCollector() *collector {
@@ -86,10 +103,9 @@ func (c *collector) add(reqBody, respBody []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pages++
-	// Paging requests carry only the selected child; the first load of the
-	// page carries every child, so a single ID is the reliable signal.
-	if len(req.ChildIDList) == 1 {
-		c.selected = req.ChildIDList[0]
+	c.lastPage = c.lastPage[:0]
+	if c.children == nil {
+		c.children = append([]string(nil), req.ChildIDList...)
 	}
 	for _, it := range resp.PurchasedItemsMetadataList {
 		if it.Category != contentTypeEbook || it.ASIN == "" {
@@ -98,17 +114,22 @@ func (c *collector) add(reqBody, respBody []byte) error {
 		if _, ok := c.books[it.ASIN]; !ok {
 			c.order = append(c.order, it.ASIN)
 		}
+		c.lastPage = append(c.lastPage, it.ASIN)
 		c.books[it.ASIN] = Book{ASIN: it.ASIN, Title: it.Title, Thumbnail: it.Thumbnail}
 	}
-	for child, v := range resp.ChildIDToAllowlistMap {
-		set := c.shared[child]
-		if set == nil {
-			set = map[string]bool{}
-			c.shared[child] = set
-		}
-		for _, e := range v.AllowlistData[contentTypeEbook] {
-			if e.AllowlistStateType == stateGranted {
-				set[e.Identifier] = true
+	// Once a search has given the complete state, partial page data would
+	// only be older.
+	if !c.fullShared {
+		for child, v := range resp.ChildIDToAllowlistMap {
+			set := c.shared[child]
+			if set == nil {
+				set = map[string]bool{}
+				c.shared[child] = set
+			}
+			for _, e := range v.AllowlistData[contentTypeEbook] {
+				if e.AllowlistStateType == stateGranted {
+					set[e.Identifier] = true
+				}
 			}
 		}
 	}
@@ -116,6 +137,78 @@ func (c *collector) add(reqBody, respBody []byte) error {
 		c.cursor = cur
 	}
 	return nil
+}
+
+// addSearch records a search response; its allowlists replace whatever the
+// list pages reported.
+func (c *collector) addSearch(respBody []byte) error {
+	var resp searchResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return fmt.Errorf("decode search response: %w", err)
+	}
+	if len(resp.ChildIDToAllowlistMap) == 0 {
+		return fmt.Errorf("search response has no share state")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	shared := map[string]map[string]bool{}
+	for child, v := range resp.ChildIDToAllowlistMap {
+		set := map[string]bool{}
+		for _, e := range v.AllowlistData[contentTypeEbook] {
+			if e.AllowlistStateType == stateGranted {
+				set[e.Identifier] = true
+			}
+		}
+		shared[child] = set
+	}
+	c.shared = shared
+	c.fullShared = true
+	return nil
+}
+
+func (c *collector) fullSharedState() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.fullShared
+}
+
+// sharedChildren reports the children with known share state.
+func (c *collector) sharedChildren() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.shared))
+	for k := range c.shared {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (c *collector) listChildren() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := append([]string(nil), c.children...)
+	sort.Strings(out)
+	return out
+}
+
+// tailKnown reports whether the last n books of the latest page are all
+// in known. The list is ordered newest first, so once the tail of a page is
+// known, everything older is too; checking several books rather than one
+// tolerates a title inserted slightly out of order.
+func (c *collector) tailKnown(known map[string]bool, n int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.lastPage) == 0 {
+		return false
+	}
+	start := max(0, len(c.lastPage)-n)
+	for _, asin := range c.lastPage[start:] {
+		if !known[asin] {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *collector) progress() (pages int, cursor string) {
@@ -129,8 +222,7 @@ func (c *collector) snapshot() *Snapshot {
 	defer c.mu.Unlock()
 	s := &Snapshot{
 		Shared:   map[string][]string{},
-		Selected: c.selected,
-		Complete: c.cursor == cursorLast,
+		Complete: c.cursor == cursorLast && c.fullShared,
 	}
 	for _, asin := range c.order {
 		s.Books = append(s.Books, c.books[asin])

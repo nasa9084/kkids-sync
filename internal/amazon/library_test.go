@@ -41,6 +41,21 @@ const (
 	}`
 )
 
+// searchResp carries the full allowlist, unlike list pages.
+const searchResp = `{
+  "childIdToAllowlistMap": {
+    "amzn1.account.CHILDA": {"allowlistData": {"EBOOK": [
+      {"allowlistStateType": "GRANTED", "identifier": "B000000001"},
+      {"allowlistStateType": "GRANTED", "identifier": "B000000003"},
+      {"allowlistStateType": "GRANTED", "identifier": "B000000009"}
+    ]}},
+    "amzn1.account.CHILDB": {"allowlistData": {"EBOOK": [
+      {"allowlistStateType": "GRANTED", "identifier": "B000000002"}
+    ]}}
+  },
+  "purchasedItemsMetadataList": []
+}`
+
 func TestCollector(t *testing.T) {
 	c := newCollector()
 	if err := c.add([]byte(firstReq), []byte(firstResp)); err != nil {
@@ -49,8 +64,8 @@ func TestCollector(t *testing.T) {
 	if pages, cur := c.progress(); pages != 1 || cur != "1788" {
 		t.Fatalf("after first page: pages=%d cursor=%q", pages, cur)
 	}
-	if s := c.snapshot(); s.Complete || s.Selected != "" {
-		t.Fatalf("after first page: complete=%v selected=%q", s.Complete, s.Selected)
+	if s := c.snapshot(); s.Complete {
+		t.Fatal("complete after the first page")
 	}
 	if err := c.add([]byte(nextReq), []byte(nextResp)); err != nil {
 		t.Fatal(err)
@@ -72,11 +87,40 @@ func TestCollector(t *testing.T) {
 	if !reflect.DeepEqual(got.Shared, wantShared) {
 		t.Errorf("Shared = %v, want %v", got.Shared, wantShared)
 	}
-	if got.Selected != "amzn1.account.CHILDA" {
-		t.Errorf("Selected = %q", got.Selected)
+	if got.Complete {
+		t.Error("Complete = true without a search response")
+	}
+
+	if err := c.addSearch([]byte(searchResp)); err != nil {
+		t.Fatal(err)
+	}
+	got = c.snapshot()
+	wantShared = map[string][]string{
+		"amzn1.account.CHILDA": {"B000000001", "B000000003", "B000000009"},
+		"amzn1.account.CHILDB": {"B000000002"},
+	}
+	if !reflect.DeepEqual(got.Shared, wantShared) {
+		t.Errorf("after search: Shared = %v, want %v", got.Shared, wantShared)
 	}
 	if !got.Complete {
-		t.Error("Complete = false, want true")
+		t.Error("Complete = false after paging to the end and a search")
+	}
+	if got, want := c.listChildren(), []string{"amzn1.account.CHILDA", "amzn1.account.CHILDB"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("listChildren = %v, want %v", got, want)
+	}
+
+	// A late list page must not overwrite the complete state.
+	if err := c.add([]byte(firstReq), []byte(firstResp)); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.snapshot().Shared; !reflect.DeepEqual(got, wantShared) {
+		t.Errorf("after a late page: Shared = %v, want %v", got, wantShared)
+	}
+}
+
+func TestAddSearchWithoutState(t *testing.T) {
+	if err := newCollector().addSearch([]byte(`{"childIdToAllowlistMap":{}}`)); err == nil {
+		t.Error("want error for a search response without share state")
 	}
 }
 
@@ -87,5 +131,25 @@ func TestCollectorRejectsBrokenJSON(t *testing.T) {
 	}
 	if err := c.add([]byte(firstReq), []byte(`<html>`)); err == nil {
 		t.Error("want error for broken response")
+	}
+}
+
+func TestTailKnown(t *testing.T) {
+	c := newCollector()
+	if c.tailKnown(map[string]bool{"B000000001": true}, 10) {
+		t.Error("tailKnown before any page")
+	}
+	if err := c.add([]byte(firstReq), []byte(firstResp)); err != nil {
+		t.Fatal(err)
+	}
+	// The page holds B000000001, B000000002 (the video is ignored).
+	if c.tailKnown(map[string]bool{"B000000001": true}, 10) {
+		t.Error("tailKnown with an unknown book on the page")
+	}
+	if !c.tailKnown(map[string]bool{"B000000002": true}, 1) {
+		t.Error("tailKnown(n=1) should only look at the last book")
+	}
+	if !c.tailKnown(map[string]bool{"B000000001": true, "B000000002": true}, 10) {
+		t.Error("tailKnown with every book known")
 	}
 }
