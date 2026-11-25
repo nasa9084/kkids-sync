@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/nasa9084/kkids-sync/internal/store"
@@ -18,6 +19,9 @@ import (
 type backoff struct {
 	path    string
 	Entries map[string]backoffEntry `json:"entries"`
+	// Unsearchable holds ASINs the dashboard's search never returned (e.g.
+	// 【連載版】 single episodes). They go straight to the list fallback.
+	Unsearchable map[string]bool `json:"unsearchable"`
 }
 
 type backoffEntry struct {
@@ -30,7 +34,7 @@ func backoffPath(state string) string {
 }
 
 func loadBackoff(path string) *backoff {
-	b := &backoff{path: path, Entries: map[string]backoffEntry{}}
+	b := &backoff{path: path, Entries: map[string]backoffEntry{}, Unsearchable: map[string]bool{}}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return b // none yet, or unreadable: start over
@@ -39,7 +43,51 @@ func loadBackoff(path string) *backoff {
 	if b.Entries == nil {
 		b.Entries = map[string]backoffEntry{}
 	}
+	if b.Unsearchable == nil {
+		b.Unsearchable = map[string]bool{}
+	}
 	return b
+}
+
+// limitUnsearchable keeps at most max changes of unsearchable books (each
+// needs the slow list fallback, which runs at most max times per run) and
+// leaves the rest for later runs without spending a place on them. It
+// returns the plan and how many it left.
+func (b *backoff) limitUnsearchable(plan map[string]store.Diff, max int) (map[string]store.Diff, int) {
+	profiles := make([]string, 0, len(plan))
+	for p := range plan {
+		profiles = append(profiles, p)
+	}
+	sort.Strings(profiles)
+	out := map[string]store.Diff{}
+	kept, left := 0, 0
+	keep := func(a string) bool {
+		if !b.Unsearchable[a] {
+			return true
+		}
+		if kept < max {
+			kept++
+			return true
+		}
+		left++
+		return false
+	}
+	for _, p := range profiles {
+		d := plan[p]
+		nd := store.Diff{Titles: d.Titles}
+		for _, a := range d.Remove {
+			if keep(a) {
+				nd.Remove = append(nd.Remove, a)
+			}
+		}
+		for _, a := range d.Add {
+			if keep(a) {
+				nd.Add = append(nd.Add, a)
+			}
+		}
+		out[p] = nd
+	}
+	return out, left
 }
 
 func backoffKey(profile, asin string) string { return profile + "/" + asin }
