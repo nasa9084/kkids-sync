@@ -89,8 +89,14 @@ func syncLibrary(ctx context.Context, log *slog.Logger, state, out string, maxPa
 		if err != nil {
 			return err
 		}
-		if prev == nil {
+		switch {
+		case prev == nil:
 			log.Info("no earlier snapshot: reading the whole library", "out", out)
+		case !prev.Complete:
+			// An incomplete snapshot misses books; trusting it would make
+			// incremental sync stop too early forever.
+			log.Info("earlier snapshot is incomplete: reading the whole library", "out", out)
+			prev = nil
 		}
 	}
 	opts := amazon.ReadLibraryOptions{MaxPages: maxPages}
@@ -102,10 +108,15 @@ func syncLibrary(ctx context.Context, log *slog.Logger, state, out string, maxPa
 	}
 
 	snap, readErr := s.ReadLibrary(ctx, opts)
-	if snap != nil && snap.Incremental && prev != nil {
+	if readErr != nil {
+		// A failed run sees only part of the library; writing it would
+		// throw away the earlier snapshot.
+		return readErr
+	}
+	if snap.Incremental && prev != nil {
 		snap = merge(snap, prev)
 	}
-	if snap != nil && len(snap.Books) > 0 {
+	if len(snap.Books) > 0 {
 		if err := writeJSON(out, snap); err != nil {
 			return errors.Join(readErr, err)
 		}
@@ -115,7 +126,7 @@ func syncLibrary(ctx context.Context, log *slog.Logger, state, out string, maxPa
 		}
 		log.Info("snapshot written", attrs...)
 	}
-	return readErr
+	return nil
 }
 
 // readSnapshot loads an earlier snapshot; a missing file is not an error.
