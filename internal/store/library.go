@@ -226,8 +226,12 @@ func (s *Store) AddJob(ctx context.Context, kind, result, detail string, started
 	return err
 }
 
-// JobRunning is the result of a job that has started and not reported back.
-const JobRunning = "running"
+// Results of a job that has not reported back: still running, or stopped
+// without a report (found when the next one of its kind starts).
+const (
+	JobRunning     = "running"
+	JobInterrupted = "interrupted"
+)
 
 // RecordJob adds a job (id 0) or updates the one with id, and returns its
 // id. A job with result JobRunning has no finish time yet.
@@ -246,12 +250,30 @@ func (s *Store) RecordJob(ctx context.Context, id int64, kind, result, detail st
 		}
 		// Gone (e.g. a fresh database): record it anew.
 	}
-	r, err := s.db.ExecContext(ctx, `INSERT INTO jobs (kind, started_at, finished_at, result, detail) VALUES (?, ?, ?, ?, ?)`,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if result == JobRunning {
+		// Only one reconciler runs at a time (the CronJob forbids overlap),
+		// so a job of this kind still "running" now never reported back:
+		// it was killed (e.g. out of memory) or lost its connection.
+		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET result = ?, detail = detail || ? WHERE kind = ? AND result = ?`,
+			JobInterrupted, "\n(終了の報告がないまま、次の実行が始まりました)", kind, JobRunning); err != nil {
+			return 0, err
+		}
+	}
+	r, err := tx.ExecContext(ctx, `INSERT INTO jobs (kind, started_at, finished_at, result, detail) VALUES (?, ?, ?, ?, ?)`,
 		kind, started.UTC().Format(time.RFC3339), finished, result, detail)
 	if err != nil {
 		return 0, err
 	}
-	return r.LastInsertId()
+	id, err = r.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
 }
 
 // BootstrapFromShared turns today's share state into selections, so the

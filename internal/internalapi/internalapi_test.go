@@ -62,6 +62,26 @@ func TestRoundTrip(t *testing.T) {
 	if jobs, _ := db.Jobs(ctx, 10); len(jobs) != 2 || jobs[0].ID != id || jobs[0].Result != "ok" || jobs[0].FinishedAt.IsZero() {
 		t.Errorf("finished job = %+v (the running row is updated, not added)", jobs)
 	}
+	// A run that never reports back is marked when the next one starts.
+	dead, _ := c.StartJob(ctx, "apply", "killed", time.Now())
+	next, _ := c.StartJob(ctx, "apply", "next", time.Now())
+	jobs, _ := db.Jobs(ctx, 10)
+	for _, j := range jobs {
+		switch j.ID {
+		case dead:
+			if j.Result != store.JobInterrupted {
+				t.Errorf("dead job = %+v", j)
+			}
+		case next:
+			if j.Result != store.JobRunning {
+				t.Errorf("next job = %+v", j)
+			}
+		case id:
+			if j.Result != "ok" {
+				t.Errorf("finished job changed: %+v", j)
+			}
+		}
+	}
 	if err := c.ReportJob(ctx, JobReport{}); err == nil {
 		t.Error("empty job report accepted")
 	}
