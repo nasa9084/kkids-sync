@@ -101,6 +101,10 @@ func (s *Store) ApplySnapshot(ctx context.Context, snap LibrarySnapshot) (Snapsh
 		res.Profiles++
 	}
 
+	if err := s.assignSeries(ctx, tx); err != nil {
+		return res, fmt.Errorf("assign series: %w", err)
+	}
+
 	detail := fmt.Sprintf("new %d, removed %d, profiles %d, incremental %v", res.NewBooks, res.RemovedBooks, res.Profiles, snap.Incremental)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs (kind, started_at, finished_at, result, detail) VALUES ('sync', ?, ?, 'ok', ?)`, now, now, detail); err != nil {
 		return res, err

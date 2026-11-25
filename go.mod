@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/mxschmitt/playwright-go v0.6401.0
+	golang.org/x/text v0.44.0
 	modernc.org/sqlite v1.63.0
 )
 
