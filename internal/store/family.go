@@ -213,3 +213,55 @@ func (s *Store) UnselectAll(ctx context.Context, memberID int64) (int, error) {
 	n, _ := r.RowsAffected()
 	return int(n), nil
 }
+
+// SeriesView is one series on the family's series list.
+type SeriesView struct {
+	ID        int64
+	Name      string
+	Volumes   int    // volumes the member can see
+	OnShelf   int    // of those, on the member's shelf
+	CoverASIN string // the first visible volume
+}
+
+// FamilySeries lists the series that have volumes the member can see,
+// filtered by a name substring, by name or by the newest volume first
+// (byNew). It returns one more than limit when there are more.
+func (s *Store) FamilySeries(ctx context.Context, memberID int64, query string, byNew bool, limit, offset int) ([]SeriesView, error) {
+	def, err := s.defaultVisible(ctx)
+	if err != nil {
+		return nil, err
+	}
+	order := `sr.name`
+	if byNew {
+		order = `MAX(b.first_seen_at) DESC, sr.name`
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT sr.id, sr.name, COUNT(*), COUNT(sel.asin),
+		       (SELECT b2.asin FROM books b2 LEFT JOIN visibility v2 ON v2.asin = b2.asin
+		        WHERE b2.series_id = sr.id AND b2.removed_at IS NULL
+		          AND COALESCE(v2.visible, sr.default_visible, ?) = 1
+		        ORDER BY COALESCE(b2.series_index, 0), b2.title LIMIT 1)
+		FROM books b
+		JOIN series sr ON sr.id = b.series_id
+		LEFT JOIN visibility v ON v.asin = b.asin
+		LEFT JOIN selections sel ON sel.asin = b.asin AND sel.member_id = ?
+		WHERE b.removed_at IS NULL
+		  AND COALESCE(v.visible, sr.default_visible, ?) = 1
+		  AND sr.name LIKE ? ESCAPE '\'
+		GROUP BY sr.id
+		ORDER BY `+order+`
+		LIMIT ? OFFSET ?`, def, memberID, def, likeArg(query), limit+1, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SeriesView
+	for rows.Next() {
+		var v SeriesView
+		if err := rows.Scan(&v.ID, &v.Name, &v.Volumes, &v.OnShelf, &v.CoverASIN); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}

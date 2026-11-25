@@ -248,3 +248,18 @@ func TestUnshelfSeriesAndClear(t *testing.T) {
 		t.Errorf("shelf after clear: %s", rec.Body.String())
 	}
 }
+
+func TestSeriesList(t *testing.T) {
+	_, as := setup(t)
+	mom := as("mom@example.com")
+	rec := do(mom, "GET", "/series", nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `href="/series/1"`) || !strings.Contains(rec.Body.String(), "全2巻") {
+		t.Fatalf("series list: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(mom, "GET", "/series?q=存在しない", nil); !strings.Contains(rec.Body.String(), "見つかりませんでした") {
+		t.Errorf("search miss: %s", rec.Body.String())
+	}
+	if rec := do(mom, "GET", "/series?sort=new", nil); rec.Code != 200 || !strings.Contains(rec.Body.String(), `href="/series/1"`) {
+		t.Errorf("sort=new: %d", rec.Code)
+	}
+}

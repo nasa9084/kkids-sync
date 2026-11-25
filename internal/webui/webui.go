@@ -50,6 +50,7 @@ type Store interface {
 	UnselectAll(ctx context.Context, memberID int64) (int, error)
 	Thumbnail(ctx context.Context, asin string) (string, error)
 	MemberByID(ctx context.Context, id int64) (store.Member, error)
+	FamilySeries(ctx context.Context, memberID int64, query string, byNew bool, limit, offset int) ([]store.SeriesView, error)
 }
 
 // Version is set at build time (-ldflags -X) and shown on the admin pages.
@@ -73,7 +74,7 @@ func New(db Store, coverDir string, log *slog.Logger) (*UI, error) {
 			return !b.SelectedAt.IsZero() && u.now().Sub(b.SelectedAt) > askFinishedAfter
 		},
 	}
-	for _, page := range []string{"search", "series", "shelf"} {
+	for _, page := range []string{"search", "series", "shelf", "series_list"} {
 		t, err := template.New(page).Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/"+page+".html")
 		if err != nil {
 			return nil, err
@@ -105,6 +106,7 @@ func (u *UI) Routes(mux *http.ServeMux) {
 	family := func(h http.HandlerFunc) http.Handler { return u.familyOnly(h) }
 	mux.Handle("GET /{$}", family(u.search))
 	mux.Handle("GET /series/{id}", family(u.series))
+	mux.Handle("GET /series", family(u.seriesList))
 	mux.Handle("POST /series/{id}/shelf", family(u.seriesShelf))
 	mux.Handle("POST /series/{id}/shelf-all", family(u.seriesShelfAll))
 	mux.Handle("POST /series/{id}/unshelf-all", family(u.seriesUnshelfAll))
@@ -203,6 +205,8 @@ type pageData struct {
 	NextThree    []string
 	Rest         []string
 	Missing      int // volumes not on the shelf yet
+	SeriesList   []store.SeriesView
+	ByNew        bool
 	// shelf page
 	Total, Pending int
 }
@@ -275,7 +279,7 @@ func (u *UI) series(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	d := pageData{Title: books[0].SeriesName, Nav: "search", Member: m, Books: books, SeriesID: id, Viewing: viewing(r.Context())}
+	d := pageData{Title: books[0].SeriesName, Nav: "series", Member: m, Books: books, SeriesID: id, Viewing: viewing(r.Context())}
 	// "Next" means the volumes after the last one on the shelf.
 	last := -1
 	for i, b := range books {
@@ -314,6 +318,46 @@ func (u *UI) seriesShelf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/series/"+r.PathValue("id"), http.StatusSeeOther)
+}
+
+// seriesList lists the series the member can see.
+func (u *UI) seriesList(w http.ResponseWriter, r *http.Request) {
+	m, _ := auth.MemberFrom(r.Context())
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	byNew := r.URL.Query().Get("sort") == "new"
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	page = max(page, 0)
+	list, err := u.db.FamilySeries(r.Context(), m.ID, q, byNew, pageSize, page*pageSize)
+	if err != nil {
+		u.fail(w, err)
+		return
+	}
+	d := pageData{Title: "シリーズ", Nav: "series", Query: q, Member: m, ByNew: byNew, Viewing: viewing(r.Context())}
+	link := func(p int) string {
+		v := url.Values{}
+		if q != "" {
+			v.Set("q", q)
+		}
+		if byNew {
+			v.Set("sort", "new")
+		}
+		if p > 0 {
+			v.Set("page", strconv.Itoa(p))
+		}
+		if len(v) == 0 {
+			return "/series"
+		}
+		return "/series?" + v.Encode()
+	}
+	if len(list) > pageSize {
+		list = list[:pageSize]
+		d.NextURL = link(page + 1)
+	}
+	if page > 0 {
+		d.PrevURL = link(page - 1)
+	}
+	d.SeriesList = list
+	u.render(w, "series_list", d)
 }
 
 // seriesShelfAll puts every volume of a series the member can see on their
