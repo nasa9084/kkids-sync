@@ -91,7 +91,6 @@ func syncLibrary(ctx context.Context, log *slog.Logger, state, out string, maxPa
 		for child, asins := range snap.Shared {
 			attrs = append(attrs, "shared["+shortID(child)+"]", len(asins))
 		}
-		attrs = append(attrs, "selected", shortID(snap.Selected))
 		log.Info("snapshot written", attrs...)
 	}
 	return readErr
