@@ -33,3 +33,12 @@ td.title img { width: 28px; height: 40px; object-fit: cover; border-radius: 3px;
 .pager { display: flex; justify-content: space-between; }
 ul { margin: 0; padding-left: 20px; }
 th, button { white-space: nowrap; }
+a.card.link { text-decoration: none; color: inherit; }
+a.card.link[aria-current] { border-color: #1E2422; box-shadow: 0 0 0 1px #1E2422; }
+.muted { font-size: 12px; color: #4C5652; }
+details.minor summary { cursor: pointer; color: #4C5652; font-size: 13px; }
+form.wrap-row { flex-wrap: wrap; }
+input[name=pattern], input[name=series] { height: 34px; padding: 0 10px; border: 1px solid #C9CFCB; border-radius: 8px; }
+input.wide { min-width: 320px; font-family: ui-monospace, monospace; }
+.error { color: #A3261B; }
+code { font-family: ui-monospace, monospace; font-size: 13px; }

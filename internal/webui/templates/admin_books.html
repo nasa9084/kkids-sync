@@ -16,13 +16,7 @@
   </div>
 </section>
 
-{{with .Overview.Outside}}
-<section class="panel">
-  <h2>ライブラリにない共有</h2>
-  <p class="label">Kindle Unlimitedの本などです。自動では外しません。</p>
-  <ul>{{range .}}<li>{{.Member}}: <a href="https://www.amazon.co.jp/dp/{{.ASIN}}" rel="noreferrer" target="_blank">{{.ASIN}}</a></li>{{end}}</ul>
-</section>
-{{end}}
+
 
 <section class="panel">
   <div class="toolbar">
@@ -47,4 +41,11 @@
     {{if .NextURL}}<a href="{{.NextURL}}">次へ →</a>{{end}}
   </div>
 </section>
+{{with .Overview.Outside}}
+<details class="panel minor">
+  <summary>ライブラリにない共有({{len .}}件)</summary>
+  <p class="label">Kindle Unlimitedの本などです。自動では外しません。</p>
+  <ul>{{range .}}<li>{{.Member}}: <a href="https://www.amazon.co.jp/dp/{{.ASIN}}" rel="noreferrer" target="_blank">{{.ASIN}}</a></li>{{end}}</ul>
+</details>
+{{end}}
 {{end}}

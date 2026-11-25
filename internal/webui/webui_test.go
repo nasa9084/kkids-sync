@@ -108,7 +108,7 @@ func TestAdminPages(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "港町ミステリー 2") {
 		t.Fatalf("admin books: %d %s", rec.Code, rec.Body.String())
 	}
-	for _, p := range []string{"/admin/series", "/admin/jobs", "/admin/"} {
+	for _, p := range []string{"/admin/series", "/admin/jobs", "/admin/", "/admin/shelves", "/admin/shelves?s=add"} {
 		if rec := do(owner, "GET", p, nil); rec.Code != 200 {
 			t.Errorf("%s: %d", p, rec.Code)
 		}
@@ -134,5 +134,34 @@ func TestAdminPages(t *testing.T) {
 	owner.ServeHTTP(rec, req)
 	if rec.Code != 403 {
 		t.Errorf("cross-site admin post: %d", rec.Code)
+	}
+}
+
+func TestAdminSeriesRules(t *testing.T) {
+	_, as := setup(t)
+	owner := as("owner@example.com")
+	post := func(target, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", target, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "http://example.com")
+		rec := httptest.NewRecorder()
+		owner.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := post("/admin/series/rules", "pattern=%5E%E6%B8%AF%E7%94%BA&series=%E6%B8%AF%E7%94%BA&preview=1") // ^港町 → 港町
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "ルール適用後") {
+		t.Fatalf("preview: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := post("/admin/series/rules", "pattern=(&series=x&preview=1"); rec.Code != 200 || !strings.Contains(rec.Body.String(), "パターンが正しくありません") {
+		t.Errorf("bad pattern: %d", rec.Code)
+	}
+	if rec := post("/admin/series/rules", "pattern=%5E%E6%B8%AF%E7%94%BA&series=%E6%B8%AF%E7%94%BA&preview=0"); rec.Code != 303 {
+		t.Errorf("save rule: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := post("/admin/series/reclassify", ""); rec.Code != 303 {
+		t.Errorf("reclassify: %d", rec.Code)
+	}
+	if rec := do(owner, "GET", "/admin/series", nil); !strings.Contains(rec.Body.String(), "<code>^港町</code>") {
+		t.Errorf("rule not listed: %s", rec.Body.String())
 	}
 }

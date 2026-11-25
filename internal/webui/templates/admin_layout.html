@@ -13,6 +13,7 @@
   <h1>ほんだな 管理</h1>
   <nav aria-label="管理メニュー">
     <a href="/admin/" {{if eq .Nav "books"}}aria-current="page"{{end}}>本</a>
+    <a href="/admin/shelves" {{if eq .Nav "shelves"}}aria-current="page"{{end}}>本棚</a>
     <a href="/admin/series" {{if eq .Nav "series"}}aria-current="page"{{end}}>シリーズ</a>
     <a href="/admin/jobs" {{if eq .Nav "jobs"}}aria-current="page"{{end}}>ジョブ履歴</a>
   </nav>
@@ -51,7 +52,13 @@
 
 {{define "series-row"}}
 <tr id="series-{{.ID}}">
-  <td><a href="/admin/?q={{.Name}}">{{.Name}}</a></td>
+  <td>
+    <form method="post" action="/admin/series/{{.ID}}/name" class="inline">
+      <a href="/admin/?q={{.Name}}">開く</a>
+      <input name="name" value="{{.Name}}" aria-label="シリーズ名">
+      <button type="submit" title="同じ名前のシリーズがあれば統合します">名前を変更</button>
+    </form>
+  </td>
   <td class="num">{{.Books}}冊</td>
   <td>
     <select name="v" hx-post="/admin/series/{{.ID}}/default" hx-trigger="change" hx-target="#series-{{.ID}}" hx-swap="outerHTML" aria-label="{{.Name}} の新刊の既定">

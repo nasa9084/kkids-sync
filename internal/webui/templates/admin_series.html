@@ -10,9 +10,51 @@
   </div>
   <div class="scroll">
   <table>
-    <thead><tr><th>シリーズ</th><th class="num">冊数</th><th>新刊の既定</th></tr></thead>
+    <thead><tr><th>シリーズ(名前を既存のシリーズと同じにすると統合)</th><th class="num">冊数</th><th>新刊の既定</th></tr></thead>
     <tbody>{{range .Series}}{{template "series-row" .}}{{else}}<tr><td colspan="3">シリーズはありません</td></tr>{{end}}</tbody>
   </table>
   </div>
+</section>
+
+<section class="panel" id="rules">
+  <h2>シリーズのルール</h2>
+  <p class="label">書名(全角英数は半角にそろえたもの)が正規表現に当てはまる本を、指定したシリーズに入れます。上から順に試し、どれにも当てはまらなければ自動の判定を使います。<code>(?P&lt;vol&gt;\d+)</code> の部分が巻数になります(なければ自動の判定の巻数)。保存すると、当てはまる本は手で直したものも含めて移動します。</p>
+  {{if .Moved}}<p class="label"><strong>ルールを保存し、{{.MovedCount}}冊を移動しました。</strong></p>{{end}}
+  {{if .Reclassified}}<p class="label"><strong>判定をやり直し、{{.MovedCount}}冊のシリーズ・巻が変わりました。</strong></p>{{end}}
+  <form method="post" action="/admin/series/reclassify" class="inline">
+    <button type="submit">ルールと自動の判定をやり直す</button>
+    <span class="label">本ごとに手で設定したシリーズはそのままです。</span>
+  </form>
+  {{if .Rules}}
+  <div class="scroll">
+  <table>
+    <thead><tr><th>パターン</th><th>シリーズ</th><th></th></tr></thead>
+    <tbody>{{range .Rules}}
+      <tr><td><code>{{.Pattern}}</code></td><td>{{.Series}}</td>
+        <td><form method="post" action="/admin/series/rules/{{.ID}}/delete"><button type="submit">削除</button></form></td></tr>
+    {{end}}</tbody>
+  </table>
+  </div>
+  {{end}}
+  <form method="post" action="/admin/series/rules" class="inline wrap-row">
+    <input name="pattern" value="{{.RulePattern}}" placeholder="例: ^横浜駅SF" aria-label="パターン(正規表現)" class="wide">
+    <input name="series" value="{{.RuleSeries}}" placeholder="シリーズ名" aria-label="シリーズ名">
+    <button type="submit" name="preview" value="1">プレビュー</button>
+    {{if .Previewed}}<button type="submit" name="preview" value="0">保存して適用</button>{{end}}
+  </form>
+  {{with .RuleError}}<p class="label error">{{.}}</p>{{end}}
+  {{if .Previewed}}
+  <p class="label">変わる本: {{len .Preview}}冊</p>
+  {{if .Preview}}
+  <div class="scroll">
+  <table>
+    <thead><tr><th>書名</th><th>今</th><th>ルール適用後</th></tr></thead>
+    <tbody>{{range .Preview}}
+      <tr><td>{{.Title}}</td><td>{{if .FromSeries}}{{.FromSeries}} {{.FromIndex}}巻{{else}}—{{end}}</td><td>{{.ToSeries}} {{.ToIndex}}巻</td></tr>
+    {{end}}</tbody>
+  </table>
+  </div>
+  {{end}}
+  {{end}}
 </section>
 {{end}}

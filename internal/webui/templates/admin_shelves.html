@@ -1,0 +1,48 @@
+{{define "content"}}
+<section class="cards">
+  {{range .Shelves}}
+  <a class="card link" href="/admin/shelves?m={{.Member.ID}}" {{if eq .Member.ID $.ShelfOf.Member.ID}}aria-current="true"{{end}}>
+    <span class="label">{{.Member.Name}}{{if .Member.KidsProfileName}}({{.Member.KidsProfileName}}){{end}}</span>
+    <strong>本棚 {{.Selected}}冊</strong>
+    <span class="label">共有中 {{.Shared}}・追加待ち {{.ToAdd}}・削除待ち {{.ToRemove}}{{if .Held}}・非公開で保留 {{.Held}}{{end}}</span>
+  </a>
+  {{else}}
+  <div class="card"><strong>家族が登録されていません</strong></div>
+  {{end}}
+</section>
+
+{{if .Shelves}}
+<section class="panel">
+  <div class="toolbar">
+    <h2>{{.ShelfOf.Member.Name}} の本棚</h2>
+    <nav class="filters" aria-label="状態で絞り込み">
+      {{range .States}}<a href="{{.URL}}" {{if .Current}}aria-current="true"{{end}}>{{.Label}}</a>{{end}}
+    </nav>
+    <form method="get" action="/admin/shelves" class="inline">
+      <input type="hidden" name="m" value="{{.ShelfOf.Member.ID}}">
+      <input type="search" name="q" value="{{.Query}}" placeholder="書名・シリーズ名" aria-label="書名・シリーズ名で絞り込み">
+      <button type="submit">絞り込む</button>
+    </form>
+  </div>
+  <p class="label">追加待ち・削除待ちは、次の反映(10分ごと)でダッシュボードに反映されます。非公開で保留は、本棚にはあるが非公開のため共有しない本です。</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>書名</th><th>シリーズ・巻</th><th>状態</th></tr></thead>
+    <tbody>
+    {{range .Shelf}}
+    <tr>
+      <td class="title"><img src="/cover/{{.ASIN}}" alt="" loading="lazy"><span>{{.Title}}</span></td>
+      <td>{{if .SeriesName}}{{.SeriesName}} {{.SeriesIndex}}巻{{else}}—{{end}}</td>
+      <td>{{if eq .State "shared"}}<span class="on">共有中</span>{{else if eq .State "add"}}<span class="off">追加待ち</span>{{else if eq .State "remove"}}<span class="off">削除待ち</span>{{else}}<span class="muted">非公開で保留</span>{{end}}</td>
+    </tr>
+    {{else}}<tr><td colspan="3">該当する本はありません</td></tr>{{end}}
+    </tbody>
+  </table>
+  </div>
+  <div class="pager">
+    {{if .PrevURL}}<a href="{{.PrevURL}}">← 前へ</a>{{else}}<span></span>{{end}}
+    {{if .NextURL}}<a href="{{.NextURL}}">次へ →</a>{{end}}
+  </div>
+</section>
+{{end}}
+{{end}}

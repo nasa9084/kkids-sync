@@ -165,8 +165,9 @@ func (s *Store) Unselect(ctx context.Context, memberID int64, asins ...string) e
 }
 
 func (s *Store) visibleTo(ctx context.Context, tx *sql.Tx, memberID int64, asin string) (bool, error) {
-	var def string
-	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = 'default_visible'`).Scan(&def); err != nil {
+	// An integer: the setting is stored as text, and '1' = 1 is false in SQLite.
+	var def int
+	if err := tx.QueryRowContext(ctx, `SELECT CAST(value AS INTEGER) FROM settings WHERE key = 'default_visible'`).Scan(&def); err != nil {
 		return false, err
 	}
 	var ok int
