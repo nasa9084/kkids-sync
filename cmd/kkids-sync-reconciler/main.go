@@ -99,12 +99,19 @@ func main() {
 	}
 }
 
-// run is what the scheduled job does: apply the plan, then sync the library
-// if apply changed something or the last snapshot is older than syncEvery.
-// With nothing to do it does not start a browser.
+// run is what the scheduled job does: sync the library first if the
+// snapshot in -out is missing or older than syncEvery, apply the plan, and
+// sync again if apply changed something. With nothing to do it does not start
+// a browser. Syncing first means the very first run fills web even though
+// the plan is then refused as too large (nobody has selected anything yet).
 func run(ctx context.Context, log *slog.Logger, client *internalapi.Client, state, out string, maxPages, maxChanges int, syncEvery, jitter time.Duration) error {
 	if jitter > 0 {
 		if err := amazon.Sleep(ctx, 0, jitter); err != nil {
+			return err
+		}
+	}
+	if fi, err := os.Stat(out); err != nil || time.Since(fi.ModTime()) > syncEvery {
+		if err := syncLibrary(ctx, log, state, out, maxPages, false, client); err != nil {
 			return err
 		}
 	}
@@ -112,11 +119,7 @@ func run(ctx context.Context, log *slog.Logger, client *internalapi.Client, stat
 	if err := apply(ctx, log, client, state, maxChanges, &res); err != nil {
 		return err
 	}
-	due := res.changed > 0
-	if fi, err := os.Stat(out); err != nil || time.Since(fi.ModTime()) > syncEvery {
-		due = true
-	}
-	if !due {
+	if res.changed == 0 {
 		return nil
 	}
 	return syncLibrary(ctx, log, state, out, maxPages, false, client)

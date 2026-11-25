@@ -14,10 +14,16 @@ Push a `v*` tag for a versioned image; `main` gets `sha-<commit>`.
 `run` is meant to be started every few minutes (one at a time):
 
 1. wait a random time up to `-jitter`;
-2. `apply` the plan. With nothing to change and every family member linked,
+2. `sync` the library if the snapshot in `-out` is missing or older than
+   `-sync-every` (default 24h);
+3. `apply` the plan. With nothing to change and every family member linked,
    no browser is started;
-3. `sync` the library if apply changed something, or if the snapshot in
-   `-out` is older than `-sync-every` (default 24h).
+4. `sync` again if apply changed something.
+
+On a fresh install the first run fills web with the library and links the
+profiles, and then refuses the plan (exit code 4): nobody has selected
+anything yet, so it would remove every share. Run `kkids-sync-web bootstrap`
+at that point.
 
 Exit codes: 3 when the Amazon session has expired, 4 when the plan has more
 changes than `-max-changes`. Both also show up in the admin page's job
