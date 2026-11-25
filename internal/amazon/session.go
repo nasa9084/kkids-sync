@@ -140,7 +140,9 @@ func Open(opts Options) (*Session, error) {
 // Close saves the (possibly refreshed) cookies and shuts the browser down.
 func (s *Session) Close() error {
 	var errs []error
-	if s.ctx != nil && s.opts.StatePath != "" {
+	// Save only while signed in: a signed-out state would overwrite a
+	// session file that might still be good (or be fixed by signing in again).
+	if s.ctx != nil && s.page != nil && s.opts.StatePath != "" && s.onDashboard() {
 		if _, err := s.ctx.StorageState(playwright.BrowserContextStorageStateOptions{Path: playwright.String(s.opts.StatePath)}); err != nil {
 			errs = append(errs, fmt.Errorf("save session: %w", err))
 		} else if err := os.Chmod(s.opts.StatePath, 0o600); err != nil {
@@ -156,17 +158,24 @@ func (s *Session) Close() error {
 	return errors.Join(errs...)
 }
 
-// Login opens the dashboard and waits until wait returns, giving a person
-// time to sign in. The session is saved by Close.
-func (s *Session) Login(wait func()) error {
+// Login opens the dashboard and waits until a person has signed in, that is
+// until the page is on the parent dashboard, or until timeout. The session
+// is saved by Close.
+func (s *Session) Login(ctx context.Context, timeout time.Duration) error {
 	if _, err := s.page.Goto(dashboardURL); err != nil {
 		s.log.Warn("open dashboard", "err", err)
 	}
-	wait()
-	if !s.onDashboard() {
-		return errors.New("not on the parent dashboard yet: sign in and try again")
+	deadline := time.Now().Add(timeout)
+	for !s.onDashboard() {
+		if time.Now().After(deadline) {
+			return errors.New("not signed in before the timeout")
+		}
+		if err := Sleep(ctx, 2*time.Second, 2*time.Second); err != nil {
+			return err
+		}
 	}
-	return nil
+	// Let the dashboard finish loading so that every cookie is set.
+	return Sleep(ctx, 5*time.Second, 5*time.Second)
 }
 
 // ReadLibraryOptions tunes ReadLibrary.

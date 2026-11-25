@@ -11,7 +11,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -68,7 +67,7 @@ func main() {
 	var err error
 	switch flag.Arg(0) {
 	case "login":
-		err = login(log, *state)
+		err = login(ctx, log, *state)
 	case "sync":
 		err = syncLibrary(ctx, log, *state, *out, *maxPages, *full, client)
 	case "link-profiles":
@@ -125,16 +124,18 @@ func run(ctx context.Context, log *slog.Logger, client *internalapi.Client, stat
 	return syncLibrary(ctx, log, state, out, maxPages, false, client)
 }
 
-func login(log *slog.Logger, state string) (err error) {
+func login(ctx context.Context, log *slog.Logger, state string) (err error) {
 	s, err := amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, Logger: log, Headless: headless})
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	return s.Login(func() {
-		fmt.Fprintln(os.Stderr, "ブラウザでサインインし、保護者ダッシュボードが表示されたら Enter を押してください")
-		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
-	})
+	log.Info("sign in to Amazon in the browser window; this ends by itself once the parent dashboard shows")
+	if err := s.Login(ctx, 15*time.Minute); err != nil {
+		return err
+	}
+	log.Info("signed in; session saved", "state", state)
+	return nil
 }
 
 func syncLibrary(ctx context.Context, log *slog.Logger, state, out string, maxPages int, full bool, client *internalapi.Client) (err error) {
