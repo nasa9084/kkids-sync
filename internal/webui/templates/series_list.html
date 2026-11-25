@@ -1,0 +1,23 @@
+{{define "content"}}
+<p class="note">
+  {{if .Query}}「{{.Query}}」のシリーズ{{if not .SeriesList}}は見つかりませんでした{{end}}{{else}}シリーズを選ぶと、巻の一覧と「全部入れる」が出ます。{{end}}
+</p>
+<nav class="sort" aria-label="並べ方">
+  <a href="/series{{if .Query}}?q={{.Query}}{{end}}" {{if not .ByNew}}aria-current="true"{{end}}>名前順</a>
+  <a href="/series?sort=new{{if .Query}}&q={{.Query}}{{end}}" {{if .ByNew}}aria-current="true"{{end}}>新しく入った順</a>
+</nav>
+{{range .SeriesList}}
+<a class="card series-card" href="/series/{{.ID}}">
+  <img class="cover" src="/cover/{{.CoverASIN}}" alt="" loading="lazy">
+  <div class="meta">
+    <span class="name">{{.Name}}</span>
+    <span class="sub">全{{.Volumes}}巻{{if .OnShelf}}・本棚に{{.OnShelf}}巻{{end}}</span>
+  </div>
+  <span class="chev" aria-hidden="true">›</span>
+</a>
+{{end}}
+<div class="pager">
+  {{if .PrevURL}}<a href="{{.PrevURL}}">← 前へ</a>{{else}}<span></span>{{end}}
+  {{if .NextURL}}<a href="{{.NextURL}}">次へ →</a>{{end}}
+</div>
+{{end}}

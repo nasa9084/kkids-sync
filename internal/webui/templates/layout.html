@@ -22,6 +22,13 @@
     <button type="submit">さがす</button>
   </form>
   {{end}}
+  {{if eq .Nav "series"}}
+  <form class="search" action="/series" method="get" role="search">
+    <input type="search" name="q" value="{{.Query}}" placeholder="シリーズ名" aria-label="シリーズを検索">
+    {{if .ByNew}}<input type="hidden" name="sort" value="new">{{end}}
+    <button type="submit">さがす</button>
+  </form>
+  {{end}}
 </header>
 <main>
 {{template "content" .}}
@@ -29,6 +36,7 @@
 <nav class="bottom" aria-label="メニュー">
   <div class="inner">
     <a href="/" {{if eq .Nav "search"}}class="current" aria-current="page"{{end}}>さがす</a>
+    <a href="/series" {{if eq .Nav "series"}}class="current" aria-current="page"{{end}}>シリーズ</a>
     <a href="/shelf" {{if eq .Nav "shelf"}}class="current" aria-current="page"{{end}}>わたしの本棚</a>
   </div>
 </nav>
