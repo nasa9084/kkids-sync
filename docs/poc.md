@@ -83,3 +83,14 @@ the last page, the reconciler types a few characters of a book title into the
 search box: the search response carries every shared ASIN for each child
 profile the list was loaded for, so no profile switching is needed.
 `complete` in the snapshot is true only when both steps succeeded.
+
+Scrolling through the whole library on every run would look nothing like a
+person, so after the first run the reconciler syncs incrementally: the list is
+ordered newest first, and paging stops once the last 10 books of a page are all
+in the previous snapshot. Usually that is the first page. New books are put in
+front of the earlier list (`incremental: true`). Books that left the library
+are only noticed by a full scan, which is run by hand:
+
+```sh
+make reconciler-sync-full
+```

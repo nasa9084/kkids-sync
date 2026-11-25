@@ -151,7 +151,14 @@ type ReadLibraryOptions struct {
 	// PageTimeout is how long to wait for the next page after scrolling
 	// (0 = 20s).
 	PageTimeout time.Duration
+	// Known holds ASINs from an earlier sync. When set, paging stops as soon
+	// as the tail of a page is all known, so a normal run reads one page
+	// instead of scrolling through the whole library. Nil reads everything.
+	Known map[string]bool
 }
+
+// knownTail is how many books at the end of a page must be known to stop.
+const knownTail = 10
 
 // ReadLibrary opens the add-content page and scrolls until every book has
 // been loaded, reading the list responses the page receives.
@@ -210,11 +217,17 @@ func (s *Session) ReadLibrary(ctx context.Context, o ReadLibraryOptions) (*Snaps
 			}
 			pages, cursor := col.progress()
 			s.log.Info("list page", "pages", pages, "cursor", cursor)
-			if cursor == cursorLast {
+			incremental := o.Known != nil && cursor != cursorLast && col.tailKnown(o.Known, knownTail)
+			if cursor == cursorLast || incremental {
 				if err := s.searchOnce(ctx, col, searched, o.PageTimeout); err != nil {
 					return col.snapshot(), err
 				}
-				return col.snapshot(), nil
+				snap := col.snapshot()
+				if incremental {
+					snap.Incremental = true
+					snap.Complete = col.fullSharedState()
+				}
+				return snap, nil
 			}
 			if pages >= o.MaxPages {
 				return col.snapshot(), fmt.Errorf("stopped after %d pages", pages)

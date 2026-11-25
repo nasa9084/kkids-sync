@@ -23,6 +23,9 @@ type Snapshot struct {
 	// state came from a search response, which carries every shared ASIN.
 	// List pages only carry the share state of their first page.
 	Complete bool `json:"complete"`
+	// Incremental is true when paging stopped early at books already known;
+	// Books then holds only the newest titles.
+	Incremental bool `json:"incremental"`
 }
 
 // listRequest is the body of POST /ajax/get-additional-content.
@@ -76,6 +79,7 @@ type collector struct {
 	fullShared bool     // shared came from a search response
 	cursor     string   // EBOOK cursor from the latest page
 	pages      int
+	lastPage   []string // EBOOK ASINs of the latest page, in list order
 }
 
 func newCollector() *collector {
@@ -99,6 +103,7 @@ func (c *collector) add(reqBody, respBody []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pages++
+	c.lastPage = c.lastPage[:0]
 	if c.children == nil {
 		c.children = append([]string(nil), req.ChildIDList...)
 	}
@@ -109,6 +114,7 @@ func (c *collector) add(reqBody, respBody []byte) error {
 		if _, ok := c.books[it.ASIN]; !ok {
 			c.order = append(c.order, it.ASIN)
 		}
+		c.lastPage = append(c.lastPage, it.ASIN)
 		c.books[it.ASIN] = Book{ASIN: it.ASIN, Title: it.Title, Thumbnail: it.Thumbnail}
 	}
 	// Once a search has given the complete state, partial page data would
@@ -160,6 +166,12 @@ func (c *collector) addSearch(respBody []byte) error {
 	return nil
 }
 
+func (c *collector) fullSharedState() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.fullShared
+}
+
 // sharedChildren reports the children with known share state.
 func (c *collector) sharedChildren() []string {
 	c.mu.Lock()
@@ -178,6 +190,25 @@ func (c *collector) listChildren() []string {
 	out := append([]string(nil), c.children...)
 	sort.Strings(out)
 	return out
+}
+
+// tailKnown reports whether the last n books of the latest page are all
+// in known. The list is ordered newest first, so once the tail of a page is
+// known, everything older is too; checking several books rather than one
+// tolerates a title inserted slightly out of order.
+func (c *collector) tailKnown(known map[string]bool, n int) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.lastPage) == 0 {
+		return false
+	}
+	start := max(0, len(c.lastPage)-n)
+	for _, asin := range c.lastPage[start:] {
+		if !known[asin] {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *collector) progress() (pages int, cursor string) {

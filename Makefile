@@ -11,7 +11,7 @@ export GOPATH     := $(POC_DIR)/tools/go-path
 
 POC := go run ./cmd/poc -dir $(POC_DIR)
 
-.PHONY: poc-install poc-login poc-inspect poc-inspect-write reconciler-login reconciler-sync poc-clean-tools poc-clean test
+.PHONY: poc-install poc-login poc-inspect poc-inspect-write reconciler-login reconciler-sync reconciler-sync-full poc-clean-tools poc-clean test
 
 poc-install:
 	$(POC) -install
@@ -36,6 +36,10 @@ reconciler-login:
 # Read-only: writes the library and share state to .poc/snapshot.json.
 reconciler-sync:
 	$(RECONCILER) -out $(POC_DIR)/snapshot.json sync
+
+# Scroll through the whole library, e.g. to notice books that left it.
+reconciler-sync-full:
+	$(RECONCILER) -out $(POC_DIR)/snapshot.json -full sync
 
 # Remove the downloaded tools and caches, keep session and recordings.
 poc-clean-tools:

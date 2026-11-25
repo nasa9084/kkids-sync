@@ -133,3 +133,23 @@ func TestCollectorRejectsBrokenJSON(t *testing.T) {
 		t.Error("want error for broken response")
 	}
 }
+
+func TestTailKnown(t *testing.T) {
+	c := newCollector()
+	if c.tailKnown(map[string]bool{"B000000001": true}, 10) {
+		t.Error("tailKnown before any page")
+	}
+	if err := c.add([]byte(firstReq), []byte(firstResp)); err != nil {
+		t.Fatal(err)
+	}
+	// The page holds B000000001, B000000002 (the video is ignored).
+	if c.tailKnown(map[string]bool{"B000000001": true}, 10) {
+		t.Error("tailKnown with an unknown book on the page")
+	}
+	if !c.tailKnown(map[string]bool{"B000000002": true}, 1) {
+		t.Error("tailKnown(n=1) should only look at the last book")
+	}
+	if !c.tailKnown(map[string]bool{"B000000001": true, "B000000002": true}, 10) {
+		t.Error("tailKnown with every book known")
+	}
+}
