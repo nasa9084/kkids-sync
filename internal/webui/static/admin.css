@@ -42,3 +42,4 @@ input[name=pattern], input[name=series] { height: 34px; padding: 0 10px; border:
 input.wide { min-width: 320px; font-family: ui-monospace, monospace; }
 .error { color: #A3261B; }
 code { font-family: ui-monospace, monospace; font-size: 13px; }
+.version { color: #4C5652; font-size: 12px; text-align: center; padding: 8px 0 0; }

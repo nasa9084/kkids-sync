@@ -52,6 +52,9 @@ type Store interface {
 	MemberByID(ctx context.Context, id int64) (store.Member, error)
 }
 
+// Version is set at build time (-ldflags -X) and shown on the admin pages.
+var Version = "dev"
+
 // UI serves the family pages.
 type UI struct {
 	db     Store
@@ -80,6 +83,7 @@ func New(db Store, coverDir string, log *slog.Logger) (*UI, error) {
 	adminFuncs := template.FuncMap{
 		"deref":   func(b *bool) bool { return b != nil && *b },
 		"fmtTime": func(t time.Time) string { return t.In(jst).Format("1/2 15:04") },
+		"version": func() string { return Version },
 	}
 	for _, page := range []string{"admin_books", "admin_series", "admin_jobs", "admin_shelves"} {
 		t, err := template.New(page).Funcs(adminFuncs).ParseFS(templateFS, "templates/admin_layout.html", "templates/"+page+".html")

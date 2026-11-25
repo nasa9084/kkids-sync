@@ -109,6 +109,9 @@ func TestAdminPages(t *testing.T) {
 		t.Fatalf("admin books: %d %s", rec.Code, rec.Body.String())
 	}
 	for _, p := range []string{"/admin/series", "/admin/jobs", "/admin/", "/admin/shelves", "/admin/shelves?s=add"} {
+		if rec := do(owner, "GET", p, nil); !strings.Contains(rec.Body.String(), "ほんだな dev") {
+			t.Errorf("%s: no version", p)
+		}
 		if rec := do(owner, "GET", p, nil); rec.Code != 200 {
 			t.Errorf("%s: %d", p, rec.Code)
 		}
