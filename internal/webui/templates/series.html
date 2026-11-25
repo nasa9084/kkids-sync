@@ -12,6 +12,11 @@
     <button class="wide-btn outline" type="submit" style="width:100%">次の{{len .NextThree}}冊だけ入れる</button>
   </form>
   {{end}}
+  {{if .OnShelfCount}}
+  <form method="post" action="/series/{{.SeriesID}}/unshelf-all" onsubmit="return confirm('このシリーズの{{.OnShelfCount}}冊を全部本棚から外しますか？')">
+    <button class="wide-btn outline" type="submit" style="width:100%">このシリーズを全部本棚から外す({{.OnShelfCount}}冊)</button>
+  </form>
+  {{end}}
 </div>
 <h2>巻の一覧</h2>
 {{range .Books}}{{template "series-book" .}}{{end}}

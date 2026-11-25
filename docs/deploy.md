@@ -21,14 +21,15 @@ Push a `v*` tag for a versioned image; `main` gets `sha-<commit>`.
 4. `sync` again if apply changed something.
 
 On a fresh install the first run fills web with the library and links the
-profiles, and then refuses the plan (exit code 4): nobody has selected
-anything yet, so it would remove every share. Run `kkids-sync-web bootstrap`
-at that point.
+profiles. Until `kkids-sync-web bootstrap` has run, the plan never removes
+anything (nobody has selected anything yet, so it would remove every share);
+run it at that point.
 
-Exit codes: 3 when the Amazon session has expired, 4 when the plan would remove more
-books than `-max-changes`. Additions are not refused: at most `-max-changes` are
-made per run and the rest on the next runs. Both codes also show up in the admin page's job
-history.
+Each run makes at most `-max-changes` changes (default 50), removals first,
+taking turns between family members; the rest follow on the next runs.
+
+Exit code 3 means the Amazon session has expired; it also shows up in the
+admin page's job history.
 
 ## The Amazon session
 

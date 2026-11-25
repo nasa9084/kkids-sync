@@ -20,4 +20,9 @@
   {{if .PrevURL}}<a href="{{.PrevURL}}">← 前へ</a>{{else}}<span></span>{{end}}
   {{if .NextURL}}<a href="{{.NextURL}}">次へ →</a>{{end}}
 </div>
+{{if .Total}}
+<form method="post" action="/shelf/clear" class="danger-zone" onsubmit="return confirm('本棚の{{.Total}}冊を全部外します。Kindleからも消えます。よろしいですか？')">
+  <button class="wide-btn outline" type="submit" style="width:100%">本棚を全部空にする</button>
+</form>
+{{end}}
 {{end}}

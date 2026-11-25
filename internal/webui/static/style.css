@@ -58,3 +58,4 @@ h2 { margin: 8px 0 0; font-size: 16px; }
 body.viewing-mode main button { pointer-events: none; opacity: .45; }
 .inline-form { display: inline; margin-left: 10px; }
 .link-btn { background: none; border: none; padding: 0; color: inherit; text-decoration: underline; font: inherit; cursor: pointer; }
+.danger-zone { margin-top: 32px; }

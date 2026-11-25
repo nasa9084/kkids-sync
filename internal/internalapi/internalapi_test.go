@@ -43,7 +43,8 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (map[string]store.Diff{"P1": {Remove: []string{"A"}, Titles: map[string]string{"A": "a"}}}); !reflect.DeepEqual(plan, want) {
+	// Not bootstrapped yet, so nothing is removed.
+	if want := (map[string]store.Diff{"P1": {}}); !reflect.DeepEqual(plan, want) {
 		t.Errorf("Plan = %+v, want %+v", plan, want)
 	}
 

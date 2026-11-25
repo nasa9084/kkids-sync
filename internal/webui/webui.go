@@ -47,9 +47,13 @@ type Store interface {
 	BookFor(ctx context.Context, memberID int64, asin string) (store.BookView, error)
 	Select(ctx context.Context, memberID int64, asins ...string) error
 	Unselect(ctx context.Context, memberID int64, asins ...string) error
+	UnselectAll(ctx context.Context, memberID int64) (int, error)
 	Thumbnail(ctx context.Context, asin string) (string, error)
 	MemberByID(ctx context.Context, id int64) (store.Member, error)
 }
+
+// Version is set at build time (-ldflags -X) and shown on the admin pages.
+var Version = "dev"
 
 // UI serves the family pages.
 type UI struct {
@@ -79,6 +83,7 @@ func New(db Store, coverDir string, log *slog.Logger) (*UI, error) {
 	adminFuncs := template.FuncMap{
 		"deref":   func(b *bool) bool { return b != nil && *b },
 		"fmtTime": func(t time.Time) string { return t.In(jst).Format("1/2 15:04") },
+		"version": func() string { return Version },
 	}
 	for _, page := range []string{"admin_books", "admin_series", "admin_jobs", "admin_shelves"} {
 		t, err := template.New(page).Funcs(adminFuncs).ParseFS(templateFS, "templates/admin_layout.html", "templates/"+page+".html")
@@ -102,6 +107,8 @@ func (u *UI) Routes(mux *http.ServeMux) {
 	mux.Handle("GET /series/{id}", family(u.series))
 	mux.Handle("POST /series/{id}/shelf", family(u.seriesShelf))
 	mux.Handle("POST /series/{id}/shelf-all", family(u.seriesShelfAll))
+	mux.Handle("POST /series/{id}/unshelf-all", family(u.seriesUnshelfAll))
+	mux.Handle("POST /shelf/clear", family(u.shelfClear))
 	mux.Handle("GET /shelf", family(u.shelf))
 	mux.Handle("POST /books/{asin}/shelf", family(u.shelfOne(true)))
 	mux.Handle("POST /books/{asin}/unshelf", family(u.shelfOne(false)))
@@ -334,6 +341,42 @@ func (u *UI) seriesShelfAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/series/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
+}
+
+// seriesUnshelfAll takes every volume of a series off the member's shelf.
+func (u *UI) seriesUnshelfAll(w http.ResponseWriter, r *http.Request) {
+	m, _ := auth.MemberFrom(r.Context())
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	books, err := u.db.SeriesBooks(r.Context(), m.ID, id)
+	if err != nil {
+		u.fail(w, err)
+		return
+	}
+	var asins []string
+	for _, b := range books {
+		if b.OnShelf {
+			asins = append(asins, b.ASIN)
+		}
+	}
+	if err := u.db.Unselect(r.Context(), m.ID, asins...); err != nil {
+		u.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/series/"+strconv.FormatInt(id, 10), http.StatusSeeOther)
+}
+
+// shelfClear empties the member's shelf.
+func (u *UI) shelfClear(w http.ResponseWriter, r *http.Request) {
+	m, _ := auth.MemberFrom(r.Context())
+	if _, err := u.db.UnselectAll(r.Context(), m.ID); err != nil {
+		u.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/shelf", http.StatusSeeOther)
 }
 
 func (u *UI) shelf(w http.ResponseWriter, r *http.Request) {

@@ -8,7 +8,9 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/kkids-sync-web ./cmd/kkids-sync-web \
+# Shown at the bottom of the admin pages; the image workflow passes the tag.
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/nasa9084/kkids-sync/internal/webui.Version=${VERSION}" -o /out/kkids-sync-web ./cmd/kkids-sync-web \
  && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/kkids-sync-reconciler ./cmd/kkids-sync-reconciler
 
 # The Playwright driver and Chromium that match the playwright-go version in go.mod.
