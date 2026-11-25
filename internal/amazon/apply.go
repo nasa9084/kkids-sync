@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mxschmitt/playwright-go"
@@ -127,78 +128,179 @@ func (w *responseWaiter) next(ctx context.Context) (capturedResponse, error) {
 }
 
 // SelectChild narrows the list to one kids profile and to books, through
-// the filter dialog. The dialog names children but not their IDs, so each
-// child is tried in turn and the ID the page then asks for is checked.
-func (s *Session) SelectChild(ctx context.Context, childID string) error {
-	for attempt := 0; ; attempt++ {
-		n, err := s.applyFilter(ctx, attempt, childID)
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, errOtherChild) {
+// the filter dialog, and checks that the page then asks for childID. With a
+// profile name the row with that name is used; without one each child is
+// tried in turn.
+func (s *Session) SelectChild(ctx context.Context, childID, name string) error {
+	if name != "" {
+		dialog, err := s.openFilter(ctx)
+		if err != nil {
 			return err
 		}
-		if attempt+1 >= n {
+		idx, err := childIndex(dialog, name)
+		if err != nil {
+			return err
+		}
+		ids, err := s.filterTo(ctx, dialog, idx)
+		if err != nil {
+			return err
+		}
+		if len(ids) != 1 || ids[0] != childID {
+			return fmt.Errorf("profile %q is not …%s on the dashboard", name, tail(childID))
+		}
+		return nil
+	}
+	for i := 0; ; i++ {
+		dialog, err := s.openFilter(ctx)
+		if err != nil {
+			return err
+		}
+		n, err := dialog.GetByRole("checkbox", playwright.LocatorGetByRoleOptions{Name: "共有中"}).Count()
+		if err != nil || n == 0 {
+			return errors.New("no children in the filter dialog")
+		}
+		if i >= n {
 			return fmt.Errorf("no child in the filter is …%s", tail(childID))
+		}
+		ids, err := s.filterTo(ctx, dialog, i)
+		if err != nil {
+			return err
+		}
+		if len(ids) == 1 && ids[0] == childID {
+			return nil
 		}
 	}
 }
 
-var errOtherChild = errors.New("filter selected another child")
+// ListChildren selects each child in the filter in turn and returns the
+// profile ID the page asks for under each name. It resets the filter after.
+func (s *Session) ListChildren(ctx context.Context) (map[string]string, error) {
+	out := map[string]string{}
+	for i := 0; ; i++ {
+		dialog, err := s.openFilter(ctx)
+		if err != nil {
+			return out, err
+		}
+		boxes := dialog.GetByRole("checkbox", playwright.LocatorGetByRoleOptions{Name: "共有中"})
+		n, err := boxes.Count()
+		if err != nil || n == 0 {
+			return out, errors.New("no children in the filter dialog")
+		}
+		if i >= n {
+			// Close the dialog we just opened.
+			_ = dialog.GetByRole("button", playwright.LocatorGetByRoleOptions{Name: "Close"}).Click()
+			break
+		}
+		name, err := childName(boxes.Nth(i))
+		if err != nil {
+			return out, err
+		}
+		ids, err := s.filterTo(ctx, dialog, i)
+		if err != nil {
+			return out, err
+		}
+		if len(ids) == 1 {
+			out[name] = ids[0]
+		}
+	}
+	if err := s.ResetFilter(ctx); err != nil {
+		s.log.Warn("reset filter", "err", err)
+	}
+	return out, nil
+}
 
-// applyFilter checks only the index-th child and the 本 type, shows the
-// results, and reports how many children the dialog offers.
-func (s *Session) applyFilter(ctx context.Context, index int, childID string) (int, error) {
+// ResetFilter clears the filter so the page shows every child again.
+func (s *Session) ResetFilter(ctx context.Context) error {
+	dialog, err := s.openFilter(ctx)
+	if err != nil {
+		return err
+	}
+	if err := dialog.GetByRole("button", playwright.LocatorGetByRoleOptions{Name: "フィルターを解除"}).Click(); err != nil {
+		return fmt.Errorf("clear filter: %w", err)
+	}
+	if err := Sleep(ctx, 500*time.Millisecond, 1500*time.Millisecond); err != nil {
+		return err
+	}
+	if visible, _ := dialog.IsVisible(); visible {
+		if err := dialog.GetByRole("button", playwright.LocatorGetByRoleOptions{Name: "結果を表示"}).Click(); err != nil {
+			return fmt.Errorf("show results: %w", err)
+		}
+	}
+	return Sleep(ctx, time.Second, 2*time.Second)
+}
+
+func (s *Session) openFilter(ctx context.Context) (playwright.Locator, error) {
 	if err := s.page.Locator(`button[aria-label^="フィルターボタン"]`).First().Click(); err != nil {
-		return 0, fmt.Errorf("open filter: %w", err)
+		return nil, fmt.Errorf("open filter: %w", err)
 	}
 	dialog := s.page.Locator(`[role="dialog"]`)
 	if err := dialog.WaitFor(); err != nil {
-		return 0, fmt.Errorf("filter dialog: %w", err)
+		return nil, fmt.Errorf("filter dialog: %w", err)
 	}
-	if err := Sleep(ctx, 500*time.Millisecond, 1500*time.Millisecond); err != nil {
+	return dialog, Sleep(ctx, 500*time.Millisecond, 1500*time.Millisecond)
+}
+
+// childName reads the profile name shown next to a child's checkbox.
+func childName(box playwright.Locator) (string, error) {
+	name, err := box.Locator(`xpath=ancestor::div[p][1]/p`).First().TextContent()
+	if err != nil {
+		return "", fmt.Errorf("read child name: %w", err)
+	}
+	return strings.TrimSpace(name), nil
+}
+
+// childIndex finds the checkbox position of the child with this name.
+func childIndex(dialog playwright.Locator, name string) (int, error) {
+	boxes := dialog.GetByRole("checkbox", playwright.LocatorGetByRoleOptions{Name: "共有中"})
+	n, err := boxes.Count()
+	if err != nil {
 		return 0, err
 	}
-	// Child checkboxes carry the text 共有中; the name sits next to them.
+	var seen []string
+	for i := 0; i < n; i++ {
+		got, err := childName(boxes.Nth(i))
+		if err != nil {
+			return 0, err
+		}
+		if got == name {
+			return i, nil
+		}
+		seen = append(seen, got)
+	}
+	return 0, fmt.Errorf("no profile named %q on the dashboard (found %s)", name, strings.Join(seen, ", "))
+}
+
+// filterTo checks only the index-th child and 本, shows the results and
+// returns the child IDs of the list request that follows.
+func (s *Session) filterTo(ctx context.Context, dialog playwright.Locator, index int) ([]string, error) {
 	children := dialog.GetByRole("checkbox", playwright.LocatorGetByRoleOptions{Name: "共有中"})
 	n, err := children.Count()
-	if err != nil || n == 0 {
-		return 0, fmt.Errorf("no children in the filter dialog")
-	}
-	if index >= n {
-		return n, errOtherChild
+	if err != nil {
+		return nil, err
 	}
 	for i := 0; i < n; i++ {
 		if err := setChecked(ctx, children.Nth(i), i == index); err != nil {
-			return n, err
+			return nil, err
 		}
 	}
 	book := dialog.GetByRole("checkbox", playwright.LocatorGetByRoleOptions{Name: "本", Exact: playwright.Bool(true)})
 	if err := setChecked(ctx, book, true); err != nil {
-		return n, fmt.Errorf("select 本: %w", err)
+		return nil, fmt.Errorf("select 本: %w", err)
 	}
-
 	waiter := s.waitFor("/ajax/get-additional-content", 20*time.Second)
 	defer waiter.stop()
 	if err := dialog.GetByRole("button", playwright.LocatorGetByRoleOptions{Name: "結果を表示"}).Click(); err != nil {
-		return n, fmt.Errorf("show results: %w", err)
+		return nil, fmt.Errorf("show results: %w", err)
 	}
-	for {
-		r, err := waiter.next(ctx)
-		if err != nil {
-			return n, fmt.Errorf("filtered list: %w", err)
-		}
-		var req listRequest
-		if json.Unmarshal(r.reqBody, &req) != nil {
-			continue
-		}
-		if len(req.ChildIDList) == 1 && req.ChildIDList[0] == childID {
-			return n, Sleep(ctx, time.Second, 3*time.Second)
-		}
-		if len(req.ChildIDList) == 1 {
-			return n, errOtherChild
-		}
+	r, err := waiter.next(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("filtered list: %w", err)
 	}
+	var req listRequest
+	if err := json.Unmarshal(r.reqBody, &req); err != nil {
+		return nil, fmt.Errorf("filtered list request: %w", err)
+	}
+	return req.ChildIDList, Sleep(ctx, time.Second, 3*time.Second)
 }
 
 func setChecked(ctx context.Context, l playwright.Locator, want bool) error {

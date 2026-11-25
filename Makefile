@@ -11,7 +11,7 @@ export GOPATH     := $(POC_DIR)/tools/go-path
 
 POC := go run ./cmd/poc -dir $(POC_DIR)
 
-.PHONY: poc-install poc-login poc-inspect poc-inspect-write poc-inspect-steps reconciler-login reconciler-sync reconciler-sync-full web-dev web-cli reconciler-sync-web reconciler-plan reconciler-apply poc-clean-tools poc-clean test
+.PHONY: poc-install poc-login poc-inspect poc-inspect-write poc-inspect-steps reconciler-login reconciler-sync reconciler-sync-full web-dev web-cli reconciler-sync-web reconciler-link reconciler-plan reconciler-apply poc-clean-tools poc-clean test
 
 poc-install:
 	$(POC) -install
@@ -61,6 +61,9 @@ web-dev:
 
 reconciler-sync-web:
 	$(RECONCILER) -out $(POC_DIR)/snapshot.json -web $(WEB) sync
+
+reconciler-link:
+	$(RECONCILER) -web $(WEB) link-profiles
 
 reconciler-plan:
 	$(RECONCILER) -web $(WEB) plan

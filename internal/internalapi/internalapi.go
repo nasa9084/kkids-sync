@@ -5,6 +5,8 @@
 //	POST /internal/v1/snapshot  record what the reconciler read
 //	GET  /internal/v1/plan      what to add to / remove from each kids profile
 //	POST /internal/v1/jobs      record a job the reconciler ran
+//	GET  /internal/v1/profiles  family members' dashboard profile names and IDs
+//	POST /internal/v1/profiles  link profile names to the IDs the reconciler saw
 //
 // Requests carry "Authorization: Bearer <token>". A NetworkPolicy limits the
 // port to the reconciler as well.
@@ -31,6 +33,8 @@ type Store interface {
 	ApplySnapshot(ctx context.Context, snap store.LibrarySnapshot) (store.SnapshotResult, error)
 	Plan(ctx context.Context) (map[string]store.Diff, error)
 	AddJob(ctx context.Context, kind, result, detail string, started time.Time) error
+	Profiles(ctx context.Context) ([]store.Profile, error)
+	LinkProfiles(ctx context.Context, ids map[string]string) (int, error)
 }
 
 // JobReport is the body of POST /internal/v1/jobs.
@@ -87,6 +91,32 @@ func Handler(db Store, token string, log *slog.Logger) http.Handler {
 			return
 		}
 		writeJSON(w, struct{}{})
+	})
+	mux.HandleFunc("GET /internal/v1/profiles", func(w http.ResponseWriter, r *http.Request) {
+		ps, err := db.Profiles(r.Context())
+		if err != nil {
+			log.Error("profiles", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if ps == nil {
+			ps = []store.Profile{}
+		}
+		writeJSON(w, ps)
+	})
+	mux.HandleFunc("POST /internal/v1/profiles", func(w http.ResponseWriter, r *http.Request) {
+		var ids map[string]string
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&ids); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		n, err := db.LinkProfiles(r.Context(), ids)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		log.Info("profiles linked", "linked", n)
+		writeJSON(w, map[string]int{"linked": n})
 	})
 	return requireToken(token, mux)
 }
@@ -168,4 +198,20 @@ func (c *Client) Plan(ctx context.Context) (map[string]store.Diff, error) {
 // ReportJob records a job in web's history.
 func (c *Client) ReportJob(ctx context.Context, j JobReport) error {
 	return c.do(ctx, http.MethodPost, "/internal/v1/jobs", j, nil)
+}
+
+// Profiles fetches the family members' profile names and IDs.
+func (c *Client) Profiles(ctx context.Context) ([]store.Profile, error) {
+	var ps []store.Profile
+	err := c.do(ctx, http.MethodGet, "/internal/v1/profiles", nil, &ps)
+	return ps, err
+}
+
+// LinkProfiles sends name → ID pairs seen on the dashboard.
+func (c *Client) LinkProfiles(ctx context.Context, ids map[string]string) (int, error) {
+	var res struct {
+		Linked int `json:"linked"`
+	}
+	err := c.do(ctx, http.MethodPost, "/internal/v1/profiles", ids, &res)
+	return res.Linked, err
 }

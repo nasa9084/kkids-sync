@@ -64,3 +64,32 @@ func TestMigrateTwice(t *testing.T) {
 		s.Close()
 	}
 }
+
+func TestLinkProfiles(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.AddMember(ctx, Member{Name: "母", Email: "mom@example.com", Role: RoleFamily, KidsProfileName: "りか"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddMember(ctx, Member{Name: "妹", Email: "sis@example.com", Role: RoleFamily, KidsProfileName: "あやね", KidsProfileID: "ID-B"}); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := s.Profiles(ctx)
+	if len(ps) != 2 || ps[0] != (Profile{Name: "りか"}) {
+		t.Fatalf("Profiles = %+v", ps)
+	}
+	n, err := s.LinkProfiles(ctx, map[string]string{"りか": "ID-A", "あやね": "ID-B", "知らない子": "ID-C"})
+	if err != nil || n != 1 {
+		t.Fatalf("LinkProfiles = %d, %v", n, err)
+	}
+	if m, _ := s.MemberByEmail(ctx, "mom@example.com"); m.KidsProfileID != "ID-A" {
+		t.Errorf("mom not linked: %+v", m)
+	}
+	if _, err := s.LinkProfiles(ctx, map[string]string{"あやね": "ID-X"}); err == nil {
+		t.Error("relinking to another ID was allowed")
+	}
+}

@@ -49,7 +49,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: kkids-sync-web serve | member add -name NAME -email EMAIL [-role family|admin] [-kids-profile ID] | member list | bootstrap")
+	return errors.New("usage: kkids-sync-web serve | member add -name NAME -email EMAIL [-role family|admin] [-kids-profile-name NAME | -kids-profile ID] | member list | bootstrap")
 }
 
 func run(log *slog.Logger, args []string, out io.Writer) error {
@@ -173,16 +173,17 @@ func memberAdd(ctx context.Context, db *store.Store, args []string, out io.Write
 	email := fs.String("email", "", "address used to sign in through Cloudflare Access")
 	role := fs.String("role", string(store.RoleFamily), "family or admin")
 	profile := fs.String("kids-profile", "", "Amazon Kids profile ID (amzn1.account.…), family only")
+	profileName := fs.String("kids-profile-name", "", "Amazon Kids profile name as shown on the parent dashboard (e.g. りか); the reconciler finds the ID")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *name == "" || *email == "" {
 		return errors.New("-name and -email are required")
 	}
-	if store.Role(*role) == store.RoleFamily && *profile == "" {
-		return errors.New("-kids-profile is required for family members")
+	if store.Role(*role) == store.RoleFamily && *profile == "" && *profileName == "" {
+		return errors.New("family members need -kids-profile-name (or -kids-profile)")
 	}
-	m, err := db.AddMember(ctx, store.Member{Name: *name, Email: *email, Role: store.Role(*role), KidsProfileID: *profile})
+	m, err := db.AddMember(ctx, store.Member{Name: *name, Email: *email, Role: store.Role(*role), KidsProfileID: *profile, KidsProfileName: *profileName})
 	if err != nil {
 		return err
 	}
@@ -196,9 +197,13 @@ func memberList(ctx context.Context, db *store.Store, out io.Writer) error {
 		return err
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tEMAIL\tROLE\tKIDS PROFILE")
+	fmt.Fprintln(tw, "ID\tNAME\tEMAIL\tROLE\tPROFILE NAME\tPROFILE ID")
 	for _, m := range ms {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", m.ID, m.Name, m.Email, m.Role, m.KidsProfileID)
+		id := m.KidsProfileID
+		if id == "" && m.KidsProfileName != "" {
+			id = "(not linked yet)"
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", m.ID, m.Name, m.Email, m.Role, m.KidsProfileName, id)
 	}
 	return tw.Flush()
 }
