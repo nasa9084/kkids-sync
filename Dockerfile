@@ -16,7 +16,8 @@ FROM build AS playwright
 ENV PLAYWRIGHT_DRIVER_PATH=/opt/playwright-driver \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 # Only the full Chromium: the reconciler runs headful under Xvfb.
-RUN go run github.com/mxschmitt/playwright-go/cmd/playwright install --no-shell chromium
+RUN go run github.com/mxschmitt/playwright-go/cmd/playwright install --no-shell chromium \
+ && chmod -R a+rX /opt/playwright-driver /opt/ms-playwright
 
 FROM gcr.io/distroless/static-debian12:nonroot AS web
 COPY --from=build /out/kkids-sync-web /usr/local/bin/kkids-sync-web
@@ -32,6 +33,7 @@ FROM debian:bookworm-slim AS reconciler
 ENV PLAYWRIGHT_DRIVER_PATH=/opt/playwright-driver \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
     DEBIAN_FRONTEND=noninteractive
+# Made readable by everyone in the playwright stage: the job runs as 65532.
 COPY --from=playwright /opt/playwright-driver /opt/playwright-driver
 COPY --from=playwright /opt/ms-playwright /opt/ms-playwright
 # Chromium's system libraries (as Playwright lists them), Xvfb for a headful
