@@ -105,7 +105,11 @@ func (s *Store) ApplySnapshot(ctx context.Context, snap LibrarySnapshot) (Snapsh
 		return res, fmt.Errorf("assign series: %w", err)
 	}
 
-	detail := fmt.Sprintf("new %d, removed %d, profiles %d, incremental %v", res.NewBooks, res.RemovedBooks, res.Profiles, snap.Incremental)
+	mode := "全件"
+	if snap.Incremental {
+		mode = "差分"
+	}
+	detail := fmt.Sprintf("%s同期: 新しい本 %d冊・ライブラリから消えた本 %d冊・共有状態 %d人分", mode, res.NewBooks, res.RemovedBooks, res.Profiles)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO jobs (kind, started_at, finished_at, result, detail) VALUES ('sync', ?, ?, 'ok', ?)`, now, now, detail); err != nil {
 		return res, err
 	}

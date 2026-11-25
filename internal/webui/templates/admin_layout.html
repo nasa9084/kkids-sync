@@ -1,0 +1,62 @@
+{{define "layout"}}<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} - ほんだな 管理</title>
+<link rel="stylesheet" href="/static/admin.css">
+<script src="/static/htmx.min.js" defer></script>
+</head>
+<body hx-headers='{"X-Requested-By": "hondana"}'>
+<div class="wrap">
+<header>
+  <h1>ほんだな 管理</h1>
+  <nav aria-label="管理メニュー">
+    <a href="/admin/" {{if eq .Nav "books"}}aria-current="page"{{end}}>本</a>
+    <a href="/admin/series" {{if eq .Nav "series"}}aria-current="page"{{end}}>シリーズ</a>
+    <a href="/admin/jobs" {{if eq .Nav "jobs"}}aria-current="page"{{end}}>ジョブ履歴</a>
+  </nav>
+</header>
+{{template "content" .}}
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "tri"}}
+<option value="" {{if not .}}selected{{end}}>既定に従う</option>
+<option value="1" {{if and . (deref .)}}selected{{end}}>公開</option>
+<option value="0" {{if and . (not (deref .))}}selected{{end}}>非公開</option>
+{{end}}
+
+{{define "book-row"}}
+<tr id="row-{{.ASIN}}">
+  <td class="title"><img src="/cover/{{.ASIN}}" alt="" loading="lazy"><span>{{.Title}}</span></td>
+  <td>
+    <form hx-post="/admin/books/{{.ASIN}}/series" hx-target="#row-{{.ASIN}}" hx-swap="outerHTML" class="series-form">
+      <input name="name" value="{{.SeriesName}}" placeholder="シリーズなし" aria-label="シリーズ名">
+      <input name="index" type="number" min="0" value="{{if .SeriesName}}{{.SeriesIndex}}{{end}}" aria-label="巻" class="num">
+      <button type="submit">変更</button>
+    </form>
+  </td>
+  <td>
+    <select name="v" hx-post="/admin/books/{{.ASIN}}/visibility" hx-trigger="change" hx-target="#row-{{.ASIN}}" hx-swap="outerHTML" aria-label="{{.Title}} の公開設定">
+      {{template "tri" .Explicit}}
+    </select>
+  </td>
+  <td>{{if .Visible}}<span class="on">公開</span>{{else}}<span class="off">非公開</span>{{end}}</td>
+  <td class="num">{{if .SharedWith}}{{.SharedWith}}人{{else}}—{{end}}</td>
+</tr>
+{{end}}
+
+{{define "series-row"}}
+<tr id="series-{{.ID}}">
+  <td><a href="/admin/?q={{.Name}}">{{.Name}}</a></td>
+  <td class="num">{{.Books}}冊</td>
+  <td>
+    <select name="v" hx-post="/admin/series/{{.ID}}/default" hx-trigger="change" hx-target="#series-{{.ID}}" hx-swap="outerHTML" aria-label="{{.Name}} の新刊の既定">
+      {{template "tri" .Default}}
+    </select>
+  </td>
+</tr>
+{{end}}

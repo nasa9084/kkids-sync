@@ -77,7 +77,7 @@ func DisplayTitle(title string) string {
 // assignSeries gives every book without a series one, when its title has a
 // volume number. Series are created on first use.
 func (s *Store) assignSeries(ctx context.Context, q execQuerier) error {
-	rows, err := q.QueryContext(ctx, `SELECT asin, title FROM books WHERE series_id IS NULL`)
+	rows, err := q.QueryContext(ctx, `SELECT asin, title FROM books WHERE series_id IS NULL AND COALESCE(series_index, 0) <> -1`)
 	if err != nil {
 		return err
 	}
