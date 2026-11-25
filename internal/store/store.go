@@ -175,3 +175,9 @@ func (s *Store) scanMember(r scanner) (Member, error) {
 	m.Role = Role(role)
 	return m, nil
 }
+
+// execQuerier is satisfied by *sql.DB and *sql.Tx.
+type execQuerier interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}

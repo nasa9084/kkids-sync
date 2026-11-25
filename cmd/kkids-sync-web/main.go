@@ -14,6 +14,7 @@
 //	KKIDS_INTERNAL_TOKEN      bearer token the reconciler must send; the internal API is off without it
 //	KKIDS_ACCESS_TEAM_DOMAIN  Cloudflare Access team domain, e.g. example.cloudflareaccess.com
 //	KKIDS_ACCESS_AUD          Access application audience tag
+//	KKIDS_COVER_DIR           where book covers are cached (default covers)
 //	KKIDS_DEV_EMAIL           skip Access and act as this address (local development only;
 //	                          the server then listens on 127.0.0.1 only)
 package main
@@ -36,6 +37,7 @@ import (
 	"github.com/nasa9084/kkids-sync/internal/auth"
 	"github.com/nasa9084/kkids-sync/internal/internalapi"
 	"github.com/nasa9084/kkids-sync/internal/store"
+	"github.com/nasa9084/kkids-sync/internal/webui"
 )
 
 func main() {
@@ -118,12 +120,14 @@ func serve(ctx context.Context, log *slog.Logger, db *store.Store) error {
 		io.WriteString(w, "ok\n")
 	})
 
+	mux.Handle("GET /static/", webui.StaticHandler())
+
+	ui, err := webui.New(db, envOr("KKIDS_COVER_DIR", "covers"), log)
+	if err != nil {
+		return err
+	}
 	app := http.NewServeMux()
-	app.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		m, _ := auth.MemberFrom(r.Context())
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprintf(w, "ほんだな: こんにちは、%sさん\n", m.Name)
-	})
+	ui.Routes(app)
 	app.Handle("GET /admin/{$}", auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		io.WriteString(w, "ほんだな 管理\n")
@@ -150,7 +154,7 @@ func serve(ctx context.Context, log *slog.Logger, db *store.Store) error {
 		go func() { errc <- srv.ListenAndServe() }()
 		log.Info("listening", "addr", srv.Addr)
 	}
-	var err error
+	err = nil
 	select {
 	case err = <-errc:
 	case <-ctx.Done():

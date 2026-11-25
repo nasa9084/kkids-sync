@@ -1,0 +1,12 @@
+{{define "content"}}
+{{if .Query}}
+<p class="note">「{{.Query}}」の本{{if not .Books}}は見つかりませんでした{{end}}</p>
+{{else}}
+<p class="note">本棚に入れると、30分ほどでKindleに届きます。</p>
+{{end}}
+{{range .Books}}{{template "book" .}}{{end}}
+<div class="pager">
+  {{if .PrevURL}}<a href="{{.PrevURL}}">← 前へ</a>{{else}}<span></span>{{end}}
+  {{if .NextURL}}<a href="{{.NextURL}}">次へ →</a>{{end}}
+</div>
+{{end}}

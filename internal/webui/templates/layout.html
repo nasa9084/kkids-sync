@@ -1,0 +1,73 @@
+{{define "layout"}}<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} - ほんだな</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/htmx.min.js" defer></script>
+</head>
+<body hx-headers='{"X-Requested-By": "hondana"}'>
+<div class="page">
+<header class="top">
+  <span class="brand">ほんだな</span>
+  <div class="title-row">
+    <h1>{{.Title}}</h1>
+    <span class="who">{{.Member.Name}}</span>
+  </div>
+  {{if eq .Nav "search"}}
+  <form class="search" action="/" method="get" role="search">
+    <input type="search" name="q" value="{{.Query}}" placeholder="書名・シリーズ名" aria-label="本を検索">
+    <button type="submit">さがす</button>
+  </form>
+  {{end}}
+</header>
+<main>
+{{template "content" .}}
+</main>
+<nav class="bottom" aria-label="メニュー">
+  <div class="inner">
+    <a href="/" {{if eq .Nav "search"}}class="current" aria-current="page"{{end}}>さがす</a>
+    <a href="/shelf" {{if eq .Nav "shelf"}}class="current" aria-current="page"{{end}}>わたしの本棚</a>
+  </div>
+</nav>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "book"}}
+<div class="card" id="book-{{.ASIN}}">
+  <img class="cover" src="/cover/{{.ASIN}}" alt="" loading="lazy">
+  <div class="meta">
+    <span class="name">{{short .Title}}</span>
+    {{if .SeriesID}}<a class="sub" href="/series/{{.SeriesID}}">シリーズを見る</a>{{end}}
+    {{template "status" .}}
+  </div>
+  {{template "shelf-button" .}}
+</div>
+{{end}}
+
+{{define "series-book"}}
+<div class="card" id="book-{{.ASIN}}">
+  <img class="cover" src="/cover/{{.ASIN}}" alt="" loading="lazy">
+  <div class="meta">
+    <span class="name">{{short .Title}}</span>
+    {{template "status" .}}
+  </div>
+  {{template "shelf-button" .}}
+</div>
+{{end}}
+
+{{define "status"}}
+{{if eq .Status "delivered"}}<span class="chip delivered">届いています</span>{{end}}
+{{if eq .Status "pending"}}<span class="chip pending">準備中</span>{{end}}
+{{end}}
+
+{{define "shelf-button"}}
+{{if .OnShelf}}
+<button class="shelf-btn remove" hx-post="/books/{{.ASIN}}/unshelf" hx-target="#book-{{.ASIN}}" hx-swap="outerHTML" aria-label="{{short .Title}} を本棚から外す">本棚から<br>外す</button>
+{{else}}
+<button class="shelf-btn add" hx-post="/books/{{.ASIN}}/shelf" hx-target="#book-{{.ASIN}}" hx-swap="outerHTML" aria-label="{{short .Title}} を本棚に入れる">本棚に<br>入れる</button>
+{{end}}
+{{end}}

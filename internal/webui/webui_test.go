@@ -1,0 +1,96 @@
+package webui
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/nasa9084/kkids-sync/internal/auth"
+	"github.com/nasa9084/kkids-sync/internal/store"
+)
+
+func setup(t *testing.T) (http.Handler, func(email string) http.Handler) {
+	t.Helper()
+	ctx := context.Background()
+	db, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	db.AddMember(ctx, store.Member{Name: "母", Email: "mom@example.com", Role: store.RoleFamily, KidsProfileID: "P1"})
+	db.AddMember(ctx, store.Member{Name: "自分", Email: "owner@example.com", Role: store.RoleAdmin})
+	if _, err := db.ApplySnapshot(ctx, store.LibrarySnapshot{
+		Books:    []store.Book{{ASIN: "B000000001", Title: "港町ミステリー 1"}, {ASIN: "B000000002", Title: "港町ミステリー 2"}},
+		Shared:   map[string][]string{"P1": {"B000000001"}},
+		Complete: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.BootstrapFromShared(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Make volume 2 visible too.
+	if err := setVisible(db, "B000000002"); err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ui, err := New(db, t.TempDir(), log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	ui.Routes(mux)
+	as := func(email string) http.Handler {
+		return auth.Middleware(auth.FixedEmail(email), db, log)(mux)
+	}
+	return mux, as
+}
+
+// setVisible marks a book visible for the family.
+func setVisible(db *store.Store, asin string) error {
+	return db.SetVisibility(context.Background(), asin, true)
+}
+
+func do(h http.Handler, method, target string, hdr map[string]string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, target, nil)
+	for k, v := range hdr {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestPages(t *testing.T) {
+	_, as := setup(t)
+	mom := as("mom@example.com")
+
+	rec := do(mom, "GET", "/", nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "港町ミステリー 2") {
+		t.Fatalf("search page: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(mom, "GET", "/shelf", nil)
+	if !strings.Contains(rec.Body.String(), "港町ミステリー 1") || strings.Contains(rec.Body.String(), "港町ミステリー 2") {
+		t.Errorf("shelf page shows the wrong books")
+	}
+
+	// Cross-site post is refused; same-origin htmx post works.
+	if rec := do(mom, "POST", "/books/B000000002/shelf", map[string]string{"Origin": "https://evil.example"}); rec.Code != 403 {
+		t.Errorf("cross-site post: %d", rec.Code)
+	}
+	rec = do(mom, "POST", "/books/B000000002/shelf", map[string]string{"Origin": "http://example.com"})
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "準備中") {
+		t.Errorf("shelf post: %d %s", rec.Code, rec.Body.String())
+	}
+
+	if rec := do(as("owner@example.com"), "GET", "/", nil); rec.Code != http.StatusSeeOther {
+		t.Errorf("admin on family page: %d, want redirect", rec.Code)
+	}
+	if rec := do(mom, "GET", "/cover/not-an-asin", nil); rec.Code != 404 {
+		t.Errorf("bad cover asin: %d", rec.Code)
+	}
+}

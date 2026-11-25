@@ -1,0 +1,23 @@
+{{define "content"}}
+<p class="note">本棚の本 {{.Total}}冊</p>
+{{if .Pending}}
+<div class="notice">届くのを待っている本が{{.Pending}}冊あります。届いたら、Kindleで「同期」を押すと一覧に出てきます。</div>
+{{end}}
+{{range .Books}}
+<div class="card" id="book-{{.ASIN}}">
+  <img class="cover" src="/cover/{{.ASIN}}" alt="" loading="lazy">
+  <div class="meta">
+    <span class="name">{{short .Title}}</span>
+    {{template "status" .}}
+    {{if askFinished .}}<span class="sub">本棚に入れてから2か月たちました。読み終わりましたか?</span>{{end}}
+  </div>
+  <button class="shelf-btn quiet" hx-post="/books/{{.ASIN}}/unshelf" hx-target="#book-{{.ASIN}}" hx-swap="delete" aria-label="{{short .Title}} を読み終えたので外す">読み終えた</button>
+</div>
+{{else}}
+<p class="note">まだ本がありません。「さがす」から本棚に入れてください。</p>
+{{end}}
+<div class="pager">
+  {{if .PrevURL}}<a href="{{.PrevURL}}">← 前へ</a>{{else}}<span></span>{{end}}
+  {{if .NextURL}}<a href="{{.NextURL}}">次へ →</a>{{end}}
+</div>
+{{end}}

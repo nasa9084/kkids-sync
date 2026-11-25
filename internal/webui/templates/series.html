@@ -1,0 +1,19 @@
+{{define "content"}}
+<p class="note">全{{len .Books}}巻・{{.OnShelfCount}}巻が本棚に</p>
+<div class="actions">
+  {{if .NextThree}}
+  <form method="post" action="/series/{{.SeriesID}}/shelf">
+    {{range .NextThree}}<input type="hidden" name="asin" value="{{.}}">{{end}}
+    <button class="wide-btn" type="submit" style="width:100%">次の{{len .NextThree}}冊を本棚に入れる</button>
+  </form>
+  {{end}}
+  {{if gt (len .Rest) (len .NextThree)}}
+  <form method="post" action="/series/{{.SeriesID}}/shelf">
+    {{range .Rest}}<input type="hidden" name="asin" value="{{.}}">{{end}}
+    <button class="wide-btn outline" type="submit" style="width:100%">残り{{len .Rest}}冊を全部入れる</button>
+  </form>
+  {{end}}
+</div>
+<h2>巻の一覧</h2>
+{{range .Books}}{{template "series-book" .}}{{end}}
+{{end}}
