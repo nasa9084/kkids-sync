@@ -21,7 +21,10 @@ var errTooManyChanges = errors.New("too many changes")
 
 // apply fetches the plan from web and carries it out on the dashboard, one
 // toggle at a time. Every change is reported as one job.
-func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, state string, maxChanges int) (err error) {
+// applyResult tells the caller whether apply touched the dashboard.
+type applyResult struct{ changed int }
+
+func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, state string, maxChanges int, res *applyResult) (err error) {
 	if client == nil {
 		return errors.New("apply needs -web")
 	}
@@ -50,7 +53,7 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 			return nil
 		}
 		var err error
-		s, err = amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, AllowExpectedWrites: true, Logger: log})
+		s, err = amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, AllowExpectedWrites: true, Logger: log, Headless: headless})
 		if err != nil {
 			return err
 		}
@@ -137,6 +140,9 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 		}
 	}
 
+	if res != nil {
+		res.changed = done
+	}
 	detail := fmt.Sprintf("変更 %d件・すでに反映済み %d件・失敗 %d件", done, skipped, len(failures))
 	if len(failures) > 0 {
 		detail += "\n" + strings.Join(failures, "\n")
@@ -189,7 +195,7 @@ func linkProfiles(ctx context.Context, log *slog.Logger, client *internalapi.Cli
 	if client == nil {
 		return errors.New("link-profiles needs -web")
 	}
-	s, err := amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, Logger: log})
+	s, err := amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, Logger: log, Headless: headless})
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,5 @@
+.poc
+.git
+*.har
+storage-state.json
+snapshot.json
