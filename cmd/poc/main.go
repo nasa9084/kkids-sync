@@ -38,6 +38,7 @@ func main() {
 	dir := flag.String("dir", ".poc", "output directory (git-ignored)")
 	start := flag.String("start", defaultStart, "page to open first")
 	install := flag.Bool("install", false, "download the Playwright driver and Chromium, then exit")
+	allowWrites := flag.Bool("allow-writes", false, "inspect: let dashboard writes through (toggles take effect) and record them")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "usage: poc [flags] login|inspect\n")
 		flag.PrintDefaults()
@@ -63,15 +64,18 @@ func main() {
 	if err := os.MkdirAll(*dir, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	if err := run(mode, *dir, *start); err != nil {
+	if err := run(mode, *dir, *start, *allowWrites); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(mode, dir, start string) error {
+func run(mode, dir, start string, allowWrites bool) error {
 	statePath := filepath.Join(dir, "storage-state.json")
 	stamp := time.Now().Format("20060102-150405")
-	policy := guard.Policy{ReadOnly: mode == "inspect"}
+	policy := guard.Policy{ReadOnly: mode == "inspect" && !allowWrites}
+	if allowWrites {
+		log.Printf("WRITES ALLOWED: toggles in the dashboard take effect")
+	}
 
 	pw, err := playwright.Run()
 	if err != nil {
@@ -141,6 +145,12 @@ func run(mode, dir, start string) error {
 			_ = route.Abort("blockedbyclient")
 			return
 		}
+		if allowWrites && isDashboardWrite(req.URL(), req.Method()) {
+			if body, err := req.PostData(); err == nil {
+				captured.save("write", fmt.Sprintf("%s %s\n\n%s\n", req.Method(), stripQuery(req.URL()), body), "txt")
+			}
+			log.Printf("WRITE %s %s", req.Method(), stripQuery(req.URL()))
+		}
 		_ = route.Continue()
 	}); err != nil {
 		return fmt.Errorf("route: %w", err)
@@ -168,11 +178,17 @@ func run(mode, dir, start string) error {
 	case "login":
 		waitEnter("ブラウザでサインインし、保護者ダッシュボードが表示されたら Enter を押してください")
 	case "inspect":
-		waitEnter("保護者ダッシュボードで、子どもプロフィール → コンテンツ管理 → Amazonコンテンツ(本)の一覧まで開いてください。\n" +
-			"一覧のスクロールやページ送り、検索も試してください(トグルは押しても反映されません)。\n" +
-			"表示が欠けるときは、ターミナルの BLOCKED の行を控えてください。\n" +
-			"トグルを1つだけ押してみてください(送ろうとした内容が blocked-*.txt に残ります)。\n" +
-			"終わったら、本の一覧を表示したまま Enter を押してください")
+		if allowWrites {
+			waitEnter("書き込みが有効です。トグルは実際に反映されます。\n" +
+				"本の一覧で、今オフになっている本を1冊選び、トグルをオンにして数秒待ち、またオフに戻してください。\n" +
+				"終わったら Enter を押してください")
+		} else {
+			waitEnter("保護者ダッシュボードで、子どもプロフィール → コンテンツ管理 → Amazonコンテンツ(本)の一覧まで開いてください。\n" +
+				"一覧のスクロールやページ送り、検索も試してください(トグルは押しても反映されません)。\n" +
+				"表示が欠けるときは、ターミナルの BLOCKED の行を控えてください。\n" +
+				"トグルを1つだけ押してみてください(送ろうとした内容が blocked-*.txt に残ります)。\n" +
+				"終わったら、本の一覧を表示したまま Enter を押してください")
+		}
 		if err := dumpPages(ctx, dir, stamp); err != nil {
 			log.Printf("dump pages: %v", err)
 		}
@@ -306,4 +322,18 @@ func stripQuery(raw string) string {
 		return raw[:i]
 	}
 	return raw
+}
+
+// isDashboardWrite reports a state-changing request to the parent dashboard
+// that is not one of the read-style endpoints.
+func isDashboardWrite(raw, method string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() != "parents.amazon.co.jp" {
+		return false
+	}
+	if method == "GET" || method == "HEAD" || method == "OPTIONS" {
+		return false
+	}
+	d, _ := guard.Policy{ReadOnly: true}.Check(raw, method, false)
+	return d == guard.Block
 }

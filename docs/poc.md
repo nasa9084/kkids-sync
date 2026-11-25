@@ -24,6 +24,10 @@ make poc-login     # sign in by hand, press Enter in the terminal when done
 make poc-inspect   # browse to the book list by hand, press Enter when done
 ```
 
+`make poc-inspect-write` is the same as `poc-inspect` but lets dashboard writes
+through, so a toggle really changes what is shared. Use it only to record a
+write, and turn the toggle back afterwards.
+
 Output goes to `.poc/`:
 
 | File | Contents | Share? |
@@ -32,6 +36,7 @@ Output goes to `.poc/`:
 | `requests-*.tsv` | one line per request, query strings removed | yes |
 | `api-*-req.json`, `api-*-resp.json` | request and response bodies of `/ajax/get-additional-content` and `/ajax/search-additional-content` (the book list) | yes |
 | `blocked-*.txt` | body of each blocked write request, e.g. pressing a toggle | yes |
+| `write-*.txt` | body of each dashboard write let through by `make poc-inspect-write` | yes |
 | `trace-*.zip` | Playwright trace (`go run github.com/mxschmitt/playwright-go/cmd/playwright show-trace`) | only if needed |
 | `network-*.har` | HAR without bodies, **includes cookies** | no |
 | `storage-state.json` | signed-in session, **includes cookies** | no |
