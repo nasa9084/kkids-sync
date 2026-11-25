@@ -109,7 +109,9 @@ type Member struct {
 	Name          string
 	Email         string
 	Role          Role
-	KidsProfileID string // empty for the admin
+	KidsProfileID string // empty for the admin, or until linked by name
+	// KidsProfileName is the profile's name on the parent dashboard.
+	KidsProfileName string
 }
 
 // ErrNotFound is returned when a lookup matches nothing.
@@ -121,13 +123,9 @@ func (s *Store) AddMember(ctx context.Context, m Member) (Member, error) {
 		return Member{}, fmt.Errorf("invalid role %q", m.Role)
 	}
 	m.Email = strings.TrimSpace(m.Email)
-	var profile any
-	if m.KidsProfileID != "" {
-		profile = m.KidsProfileID
-	}
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO members (name, email, role, kids_profile_id) VALUES (?, ?, ?, ?)`,
-		m.Name, m.Email, string(m.Role), profile)
+		`INSERT INTO members (name, email, role, kids_profile_id, kids_profile_name) VALUES (?, ?, ?, ?, ?)`,
+		m.Name, m.Email, string(m.Role), nullString(m.KidsProfileID), nullString(m.KidsProfileName))
 	if err != nil {
 		return Member{}, fmt.Errorf("add member: %w", err)
 	}
@@ -138,14 +136,14 @@ func (s *Store) AddMember(ctx context.Context, m Member) (Member, error) {
 // MemberByEmail finds a member by email, ignoring case.
 func (s *Store) MemberByEmail(ctx context.Context, email string) (Member, error) {
 	return s.scanMember(s.db.QueryRowContext(ctx,
-		`SELECT id, name, email, role, COALESCE(kids_profile_id, '') FROM members WHERE email = ?`,
+		`SELECT id, name, email, role, COALESCE(kids_profile_id, ''), COALESCE(kids_profile_name, '') FROM members WHERE email = ?`,
 		strings.TrimSpace(email)))
 }
 
 // Members lists everyone, admins first.
 func (s *Store) Members(ctx context.Context) ([]Member, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, email, role, COALESCE(kids_profile_id, '') FROM members ORDER BY role = 'family', id`)
+		`SELECT id, name, email, role, COALESCE(kids_profile_id, ''), COALESCE(kids_profile_name, '') FROM members ORDER BY role = 'family', id`)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +164,7 @@ type scanner interface{ Scan(dest ...any) error }
 func (s *Store) scanMember(r scanner) (Member, error) {
 	var m Member
 	var role string
-	if err := r.Scan(&m.ID, &m.Name, &m.Email, &role, &m.KidsProfileID); err != nil {
+	if err := r.Scan(&m.ID, &m.Name, &m.Email, &role, &m.KidsProfileID, &m.KidsProfileName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Member{}, ErrNotFound
 		}
@@ -180,4 +178,67 @@ func (s *Store) scanMember(r scanner) (Member, error) {
 type execQuerier interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func nullString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// Profile ties a family member's dashboard profile name to its ID.
+type Profile struct {
+	Name string `json:"name"`
+	ID   string `json:"id,omitempty"`
+}
+
+// Profiles lists the family members' profiles that have a name.
+func (s *Store) Profiles(ctx context.Context) ([]Profile, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT kids_profile_name, COALESCE(kids_profile_id, '') FROM members WHERE role = 'family' AND kids_profile_name IS NOT NULL ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Profile
+	for rows.Next() {
+		var p Profile
+		if err := rows.Scan(&p.Name, &p.ID); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// LinkProfiles fills in kids_profile_id for members registered by profile
+// name. A name already linked to a different ID is an error: profiles are
+// not expected to change their IDs.
+func (s *Store) LinkProfiles(ctx context.Context, ids map[string]string) (linked int, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	for name, id := range ids {
+		var cur sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT kids_profile_id FROM members WHERE kids_profile_name = ? AND role = 'family'`, name).Scan(&cur)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if cur.Valid && cur.String == id {
+			continue
+		}
+		if cur.Valid {
+			return 0, fmt.Errorf("profile %q is linked to another ID already", name)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE members SET kids_profile_id = ? WHERE kids_profile_name = ?`, id, name); err != nil {
+			return 0, fmt.Errorf("link %q: %w", name, err)
+		}
+		linked++
+	}
+	return linked, tx.Commit()
 }

@@ -26,6 +26,53 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 		return errors.New("apply needs -web")
 	}
 	started := time.Now()
+	report := func(result, detail string) {
+		if err := client.ReportJob(context.WithoutCancel(ctx), internalapi.JobReport{Kind: "apply", Result: result, Detail: detail, StartedAt: started}); err != nil {
+			log.Warn("report job", "err", err)
+		}
+	}
+
+	profs, err := client.Profiles(ctx)
+	if err != nil {
+		return err
+	}
+	var s *amazon.Session
+	defer func() {
+		if s != nil {
+			if rerr := s.ResetFilter(context.WithoutCancel(ctx)); rerr != nil {
+				log.Warn("reset filter", "err", rerr)
+			}
+			err = errors.Join(err, s.Close())
+		}
+	}()
+	open := func() error {
+		if s != nil {
+			return nil
+		}
+		var err error
+		s, err = amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, AllowExpectedWrites: true, Logger: log})
+		if err != nil {
+			return err
+		}
+		return s.OpenAddContent(ctx)
+	}
+	if unlinked(profs) {
+		if err := open(); err != nil {
+			report("failed", err.Error())
+			return err
+		}
+		if profs, err = link(ctx, log, client, s); err != nil {
+			report("failed", err.Error())
+			return err
+		}
+	}
+	names := map[string]string{}
+	for _, p := range profs {
+		if p.ID != "" {
+			names[p.ID] = p.Name
+		}
+	}
+
 	plan, err := client.Plan(ctx)
 	if err != nil {
 		return err
@@ -38,22 +85,11 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 		log.Info("nothing to apply")
 		return nil
 	}
-	report := func(result, detail string) {
-		if err := client.ReportJob(context.WithoutCancel(ctx), internalapi.JobReport{Kind: "apply", Result: result, Detail: detail, StartedAt: started}); err != nil {
-			log.Warn("report job", "err", err)
-		}
-	}
 	if total > maxChanges {
 		report("stopped", fmt.Sprintf("変更が%d件あり、上限%d件を超えたため実行しませんでした", total, maxChanges))
 		return fmt.Errorf("%w: %d planned, limit %d", errTooManyChanges, total, maxChanges)
 	}
-
-	s, err := amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, AllowExpectedWrites: true, Logger: log})
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, s.Close()) }()
-	if err := s.OpenAddContent(ctx); err != nil {
+	if err := open(); err != nil {
 		report("failed", err.Error())
 		return err
 	}
@@ -70,7 +106,7 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 		if len(d.Add)+len(d.Remove) == 0 {
 			continue
 		}
-		if err := s.SelectChild(ctx, profile); err != nil {
+		if err := s.SelectChild(ctx, profile, names[profile]); err != nil {
 			if errors.Is(err, amazon.ErrSignedOut) || ctx.Err() != nil {
 				report("failed", err.Error())
 				return err
@@ -110,6 +146,59 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	report("ok", detail)
 	log.Info("applied", "changed", done, "skipped", skipped)
 	return nil
+}
+
+func unlinked(ps []store.Profile) bool {
+	for _, p := range ps {
+		if p.Name != "" && p.ID == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// link reads the profile names and IDs from the dashboard's filter, sends
+// them to web and returns the members' profiles afterwards.
+func link(ctx context.Context, log *slog.Logger, client *internalapi.Client, s *amazon.Session) ([]store.Profile, error) {
+	ids, err := s.ListChildren(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for name, id := range ids {
+		log.Info("profile on dashboard", "name", name, "id", shortID(id))
+	}
+	n, err := client.LinkProfiles(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("profiles linked", "updated", n)
+	profs, err := client.Profiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range profs {
+		if p.ID == "" {
+			log.Warn("no profile with this name on the dashboard", "name", p.Name)
+		}
+	}
+	return profs, nil
+}
+
+// linkProfiles is the link-profiles command.
+func linkProfiles(ctx context.Context, log *slog.Logger, client *internalapi.Client, state string) (err error) {
+	if client == nil {
+		return errors.New("link-profiles needs -web")
+	}
+	s, err := amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, Logger: log})
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, s.Close()) }()
+	if err := s.OpenAddContent(ctx); err != nil {
+		return err
+	}
+	_, err = link(ctx, log, client, s)
+	return err
 }
 
 type step struct {

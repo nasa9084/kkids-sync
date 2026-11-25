@@ -28,12 +28,20 @@ first plan would remove every book. Before any reconcile that writes:
 
 ```sh
 kkids-sync-web member add -name 自分 -email OWNER -role admin
-kkids-sync-web member add -name 母 -email MOM -kids-profile amzn1.account.…
-kkids-sync-web member add -name 妹 -email SISTER -kids-profile amzn1.account.…
-kkids-sync-reconciler -web http://WEB:8081 sync   # with KKIDS_INTERNAL_TOKEN set
+kkids-sync-web member add -name 母 -email MOM -kids-profile-name MOM_PROFILE
+kkids-sync-web member add -name 妹 -email SISTER -kids-profile-name SISTER_PROFILE
+kkids-sync-reconciler -web http://WEB:8081 link-profiles   # with KKIDS_INTERNAL_TOKEN set
+kkids-sync-reconciler -web http://WEB:8081 sync
 kkids-sync-web bootstrap                          # selections := today's shares
 kkids-sync-reconciler -web http://WEB:8081 plan   # should show no changes
 ```
+
+`-kids-profile-name` is the profile name as the parent dashboard shows it.
+`link-profiles` selects each child in the dashboard's filter, reads which
+profile ID the page then asks for, and stores it for the member with that
+name; `member list` shows the result. `apply` does the same on its own when
+a member has a name but no ID yet. `-kids-profile amzn1.account.…` still
+sets the ID directly.
 
 `bootstrap` refuses to run twice or before the first sync.
 
@@ -47,8 +55,10 @@ make web-dev WEB_EMAIL=owner@example.com
 
 # terminal 2
 make web-cli ARGS="member add -name 自分 -email owner@example.com -role admin"
-make web-cli ARGS="member add -name 母 -email mom@example.com -kids-profile amzn1.account.…"
-make web-cli ARGS="member add -name 妹 -email sister@example.com -kids-profile amzn1.account.…"
+make web-cli ARGS="member add -name 母 -email mom@example.com -kids-profile-name MOM_PROFILE"
+make web-cli ARGS="member add -name 妹 -email sister@example.com -kids-profile-name SISTER_PROFILE"
+make reconciler-link              # profile names → IDs from the dashboard
+make web-cli ARGS="member list"   # check both are linked
 make reconciler-sync-web          # library and share state into web
 make web-cli ARGS="bootstrap"     # today's shares become selections
 make reconciler-plan              # should show no changes
@@ -64,8 +74,10 @@ make reconciler-plan              # what would change
 make reconciler-apply             # change it on the dashboard, then sync
 ```
 
-`apply` selects one child through the dashboard's filter, searches each
+`apply` selects one child by name through the dashboard's filter (and
+checks the ID the page asks for), searches each
 book by title and presses its toggle. The guard lets through only the one
 write it expects (that child, that book, that direction) and blocks
-anything else. Plans larger than `MAX_CHANGES` (default 50) are refused
+anything else. At the end it clears the filter again.
+Plans larger than `MAX_CHANGES` (default 50) are refused
 with exit code 4.

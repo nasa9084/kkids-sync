@@ -35,7 +35,7 @@ func main() {
 	web := flag.String("web", "", "kkids-sync-web internal API base URL, e.g. http://kkids-sync-web:8081")
 	maxChanges := flag.Int("max-changes", 50, "apply: refuse plans with more changes than this")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: kkids-sync-reconciler [flags] login|sync|plan|apply\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: kkids-sync-reconciler [flags] login|sync|link-profiles|plan|apply\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -64,6 +64,8 @@ func main() {
 		err = login(log, *state)
 	case "sync":
 		err = syncLibrary(ctx, log, *state, *out, *maxPages, *full, client)
+	case "link-profiles":
+		err = linkProfiles(ctx, log, client, *state)
 	case "plan":
 		err = showPlan(ctx, client)
 	case "apply":

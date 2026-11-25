@@ -54,6 +54,17 @@ func TestRoundTrip(t *testing.T) {
 		t.Error("empty job report accepted")
 	}
 
+	if _, err := db.AddMember(ctx, store.Member{Name: "Sis", Email: "sis@example.com", Role: store.RoleFamily, KidsProfileName: "あやね"}); err != nil {
+		t.Fatal(err)
+	}
+	ps, err := c.Profiles(ctx)
+	if err != nil || len(ps) != 1 || ps[0].Name != "あやね" || ps[0].ID != "" {
+		t.Fatalf("Profiles = %+v, %v", ps, err)
+	}
+	if n, err := c.LinkProfiles(ctx, map[string]string{"あやね": "P2"}); err != nil || n != 1 {
+		t.Errorf("LinkProfiles = %d, %v", n, err)
+	}
+
 	snap.Complete = false
 	if _, err := c.PostSnapshot(ctx, snap); err == nil {
 		t.Error("incomplete snapshot accepted")
