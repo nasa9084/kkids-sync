@@ -32,12 +32,16 @@ history.
 ## The Amazon session
 
 The session file (`storage-state.json`) contains live cookies: keep it out of
-Git, images and logs. The cluster has no screen to sign in with, so sign in
-on a desktop and copy the file over:
+Git, images and logs. Amazon ties a session to the browser it was made in, so
+a file signed in on the Mac does not work in the cluster: sign in with the
+reconciler's own browser instead.
 
-```sh
-make reconciler-login                        # on the Mac
-# copy .poc/storage-state.json to the reconciler's /data, mode 0600
-```
+`kkids-sync-login` (in the reconciler image) starts the browser on a virtual
+screen, shows it through noVNC on port 6080 with a random password printed at
+start, and runs `kkids-sync-reconciler login`. Open
+`http://<host>:6080/vnc.html`, sign in (including the one-time code), and it
+saves the session once the parent dashboard shows (or gives up after 15
+minutes). Do the same again when the job exits with code 3.
 
-Do the same again when the job exits with code 3.
+The session is saved only while the page is on the dashboard, so a run that
+finds itself signed out does not overwrite the file.
