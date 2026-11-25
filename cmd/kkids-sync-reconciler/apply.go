@@ -134,11 +134,11 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 			// The page grows with every search (it ran out of memory at
 			// 1.5GiB once without the list): start afresh every ten books.
 			if i > 0 && i%10 == 0 {
-				if err := s.OpenAddContent(ctx); err != nil {
-					report("failed", err.Error())
-					return err
-				}
-				if err := s.SelectChild(ctx, profile, names[profile]); err != nil {
+				if err := reopen(ctx, s, profile, names[profile]); err != nil {
+					if ctx.Err() != nil {
+						report("failed", err.Error())
+						return err
+					}
 					failures = append(failures, fmt.Sprintf("%s: %v", shortID(profile), err))
 					break
 				}
@@ -373,11 +373,22 @@ func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile, n
 	changed, err := s.ToggleInList(ctx, profile, st.asin, st.add)
 	// The scrolled list holds hundreds of books in the page (it ran Chromium
 	// out of memory once): load the page afresh and select the child again.
-	if rerr := s.OpenAddContent(ctx); rerr != nil {
-		return changed, errors.Join(err, rerr)
-	}
-	if rerr := s.SelectChild(ctx, profile, name); rerr != nil {
+	if rerr := reopen(ctx, s, profile, name); rerr != nil {
 		return changed, errors.Join(err, rerr)
 	}
 	return changed, err
+}
+
+// reopen loads the add-content page afresh and selects the child again.
+// The dashboard remembers the filter across loads, and choosing the same
+// child again sends no new list request (the wait for it timed out), so
+// the filter is cleared first.
+func reopen(ctx context.Context, s *amazon.Session, profile, name string) error {
+	if err := s.OpenAddContent(ctx); err != nil {
+		return err
+	}
+	if err := s.ResetFilter(ctx); err != nil {
+		return fmt.Errorf("clear filter: %w", err)
+	}
+	return s.SelectChild(ctx, profile, name)
 }
