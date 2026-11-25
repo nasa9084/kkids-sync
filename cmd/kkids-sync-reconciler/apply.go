@@ -130,7 +130,19 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 			failures = append(failures, fmt.Sprintf("%s: %v", shortID(profile), err))
 			continue
 		}
-		for _, step := range steps(d) {
+		for i, step := range steps(d) {
+			// The page grows with every search (it ran out of memory at
+			// 1.5GiB once without the list): start afresh every ten books.
+			if i > 0 && i%10 == 0 {
+				if err := s.OpenAddContent(ctx); err != nil {
+					report("failed", err.Error())
+					return err
+				}
+				if err := s.SelectChild(ctx, profile, names[profile]); err != nil {
+					failures = append(failures, fmt.Sprintf("%s: %v", shortID(profile), err))
+					break
+				}
+			}
 			changed, err := toggle(ctx, log, s, profile, names[profile], step, d.Titles[step.asin], &listBudget, bo)
 			switch {
 			case err != nil:

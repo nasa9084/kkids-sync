@@ -42,8 +42,11 @@ type listResponse struct {
 			Identifier         string `json:"identifier"`
 		} `json:"allowlistData"`
 	} `json:"childIdToAllowlistMap"`
-	ContentTypeToCursorMap     map[string]string `json:"contentTypeToCursorMap"`
-	PurchasedItemsMetadataList []struct {
+	ContentTypeToCursorMap map[string]string `json:"contentTypeToCursorMap"`
+	// Search results come ten at a time; scrolling asks for the next ten.
+	// The response carries the offset reached so far under "MYCD".
+	DependencyPaginationTokenMap map[string]int `json:"dependencyPaginationTokenMap"`
+	PurchasedItemsMetadataList   []struct {
 		Category  string `json:"category"`
 		Title     string `json:"title"`
 		ASIN      string `json:"asin"`
