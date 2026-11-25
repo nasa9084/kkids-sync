@@ -165,3 +165,36 @@ func TestAdminSeriesRules(t *testing.T) {
 		t.Errorf("rule not listed: %s", rec.Body.String())
 	}
 }
+
+func TestAdminViewAs(t *testing.T) {
+	_, as := setup(t)
+	owner := as("owner@example.com")
+	mom := as("mom@example.com")
+
+	// Without view-as the admin is sent to the admin page.
+	if rec := do(owner, "GET", "/shelf", nil); rec.Code != 303 {
+		t.Fatalf("admin on family page: %d", rec.Code)
+	}
+	rec := do(owner, "POST", "/admin/view-as/1", map[string]string{"Origin": "http://example.com"})
+	if rec.Code != 303 {
+		t.Fatalf("view-as: %d", rec.Code)
+	}
+	cookie := rec.Result().Cookies()[0]
+	hdr := map[string]string{"Cookie": cookie.Name + "=" + cookie.Value}
+
+	rec = do(owner, "GET", "/shelf", hdr)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "母さんの画面を見ています") || !strings.Contains(rec.Body.String(), "港町ミステリー 1") {
+		t.Fatalf("view-as shelf: %d %s", rec.Code, rec.Body.String())
+	}
+	hdr["Origin"] = "http://example.com"
+	if rec := do(owner, "POST", "/books/B000000002/shelf", hdr); rec.Code != 403 {
+		t.Errorf("view-as post: %d, want 403", rec.Code)
+	}
+	// The cookie means nothing to a family member, and the admin page still works.
+	if rec := do(mom, "GET", "/shelf", hdr); strings.Contains(rec.Body.String(), "画面を見ています") {
+		t.Error("family member got the view-as banner")
+	}
+	if rec := do(owner, "GET", "/admin/view-as/end", hdr); rec.Code != 303 {
+		t.Errorf("end view-as: %d", rec.Code)
+	}
+}

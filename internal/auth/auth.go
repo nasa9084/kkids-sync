@@ -104,6 +104,12 @@ func Middleware(v EmailVerifier, members MemberLookup, log *slog.Logger) func(ht
 	}
 }
 
+// WithMember returns ctx with m as the signed-in member. The admin's
+// "view as" uses it to show a family member's pages.
+func WithMember(ctx context.Context, m store.Member) context.Context {
+	return context.WithValue(ctx, ctxKey{}, m)
+}
+
 // MemberFrom returns the member Middleware stored.
 func MemberFrom(ctx context.Context) (store.Member, bool) {
 	m, ok := ctx.Value(ctxKey{}).(store.Member)
