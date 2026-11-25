@@ -88,7 +88,9 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	if held > 0 {
 		log.Info("changes held after earlier failures", "held", held)
 	}
+	plan, slow := bo.limitUnsearchable(plan, listFallbacks)
 	plan, total, deferred := limitPlan(plan, maxChanges)
+	deferred += slow
 	if total == 0 {
 		log.Info("nothing to apply", "held", held)
 		return nil
@@ -129,7 +131,7 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 			continue
 		}
 		for _, step := range steps(d) {
-			changed, err := toggle(ctx, log, s, profile, names[profile], step, d.Titles[step.asin], &listBudget)
+			changed, err := toggle(ctx, log, s, profile, names[profile], step, d.Titles[step.asin], &listBudget, bo)
 			switch {
 			case err != nil:
 				if ctx.Err() != nil {
@@ -327,9 +329,14 @@ const listFallbacks = 5
 
 // toggle tries each query until the search shows the book, then (while
 // *listBudget lasts) scrolls the list for it.
-func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile, name string, st step, title string, listBudget *int) (bool, error) {
+func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile, name string, st step, title string, listBudget *int, bo *backoff) (bool, error) {
 	var err error
-	for i, q := range queries(title) {
+	qs := queries(title)
+	if bo.Unsearchable[st.asin] {
+		qs = nil // the search never shows it: go to the list
+		err = fmt.Errorf("%s: %w (before)", st.asin, amazon.ErrNotInSearch)
+	}
+	for i, q := range qs {
 		if i > 0 {
 			log.Info("retrying search", "asin", st.asin, "query", q)
 			if err := amazon.Sleep(ctx, 2*time.Second, 5*time.Second); err != nil {
@@ -342,6 +349,7 @@ func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile, n
 			return changed, err
 		}
 	}
+	bo.Unsearchable[st.asin] = true
 	if *listBudget <= 0 {
 		return false, err
 	}

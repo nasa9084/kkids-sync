@@ -113,3 +113,22 @@ func TestBackoff(t *testing.T) {
 		t.Errorf("stale entries kept: %v", b.Entries)
 	}
 }
+
+func TestLimitUnsearchable(t *testing.T) {
+	b := loadBackoff(filepath.Join(t.TempDir(), "failures.json"))
+	b.Unsearchable["U1"], b.Unsearchable["U2"], b.Unsearchable["U3"] = true, true, true
+	plan := map[string]store.Diff{"P": {Remove: []string{"U1", "A", "U2"}, Add: []string{"U3", "B"}}}
+	out, left := b.limitUnsearchable(plan, 2)
+	if left != 1 {
+		t.Errorf("left = %d", left)
+	}
+	if got := out["P"]; !slices.Equal(got.Remove, []string{"U1", "A", "U2"}) || !slices.Equal(got.Add, []string{"B"}) {
+		t.Errorf("plan = %+v", got)
+	}
+	if err := b.save(); err != nil {
+		t.Fatal(err)
+	}
+	if again := loadBackoff(b.path); !again.Unsearchable["U2"] {
+		t.Error("unsearchable not saved")
+	}
+}
