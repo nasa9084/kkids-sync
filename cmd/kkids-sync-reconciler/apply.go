@@ -101,6 +101,7 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	}
 
 	var done, skipped int
+	listBudget := listFallbacks
 	var failures []string
 	profiles := make([]string, 0, len(plan))
 	for p := range plan {
@@ -121,7 +122,7 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 			continue
 		}
 		for _, step := range steps(d) {
-			changed, err := toggle(ctx, log, s, profile, step, d.Titles[step.asin])
+			changed, err := toggle(ctx, log, s, profile, step, d.Titles[step.asin], &listBudget)
 			switch {
 			case err != nil:
 				if ctx.Err() != nil {
@@ -312,8 +313,13 @@ func queries(title string) []string {
 	return out
 }
 
-// toggle tries each query until the search shows the book.
-func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile string, st step, title string) (bool, error) {
+// listFallbacks is how many books per run may be looked for by scrolling
+// the list when no search shows them; each can take a few minutes.
+const listFallbacks = 5
+
+// toggle tries each query until the search shows the book, then (while
+// *listBudget lasts) scrolls the list for it.
+func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile string, st step, title string, listBudget *int) (bool, error) {
 	var err error
 	for i, q := range queries(title) {
 		if i > 0 {
@@ -328,5 +334,13 @@ func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile st
 			return changed, err
 		}
 	}
-	return false, err
+	if *listBudget <= 0 {
+		return false, err
+	}
+	*listBudget--
+	log.Info("looking for the book in the list", "asin", st.asin, "search", err)
+	if err := amazon.Sleep(ctx, 2*time.Second, 5*time.Second); err != nil {
+		return false, err
+	}
+	return s.ToggleInList(ctx, profile, st.asin, st.add)
 }
