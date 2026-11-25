@@ -222,9 +222,36 @@ func (s *Store) Plan(ctx context.Context) (map[string]Diff, error) {
 
 // AddJob records a job the reconciler ran.
 func (s *Store) AddJob(ctx context.Context, kind, result, detail string, started time.Time) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO jobs (kind, started_at, finished_at, result, detail) VALUES (?, ?, ?, ?, ?)`,
-		kind, started.UTC().Format(time.RFC3339), s.stamp(), result, detail)
+	_, err := s.RecordJob(ctx, 0, kind, result, detail, started)
 	return err
+}
+
+// JobRunning is the result of a job that has started and not reported back.
+const JobRunning = "running"
+
+// RecordJob adds a job (id 0) or updates the one with id, and returns its
+// id. A job with result JobRunning has no finish time yet.
+func (s *Store) RecordJob(ctx context.Context, id int64, kind, result, detail string, started time.Time) (int64, error) {
+	var finished any = s.stamp()
+	if result == JobRunning {
+		finished = nil
+	}
+	if id != 0 {
+		r, err := s.db.ExecContext(ctx, `UPDATE jobs SET finished_at = ?, result = ?, detail = ? WHERE id = ?`, finished, result, detail, id)
+		if err != nil {
+			return 0, err
+		}
+		if n, _ := r.RowsAffected(); n == 1 {
+			return id, nil
+		}
+		// Gone (e.g. a fresh database): record it anew.
+	}
+	r, err := s.db.ExecContext(ctx, `INSERT INTO jobs (kind, started_at, finished_at, result, detail) VALUES (?, ?, ?, ?, ?)`,
+		kind, started.UTC().Format(time.RFC3339), finished, result, detail)
+	if err != nil {
+		return 0, err
+	}
+	return r.LastInsertId()
 }
 
 // BootstrapFromShared turns today's share state into selections, so the

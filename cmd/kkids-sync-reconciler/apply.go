@@ -26,8 +26,9 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 		return errors.New("apply needs -web")
 	}
 	started := time.Now()
+	var jobID int64 // set once the run is shown as running
 	report := func(result, detail string) {
-		if err := client.ReportJob(context.WithoutCancel(ctx), internalapi.JobReport{Kind: "apply", Result: result, Detail: detail, StartedAt: started}); err != nil {
+		if err := client.ReportJob(context.WithoutCancel(ctx), internalapi.JobReport{ID: jobID, Kind: "apply", Result: result, Detail: detail, StartedAt: started}); err != nil {
 			log.Warn("report job", "err", err)
 		}
 	}
@@ -95,6 +96,12 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	if deferred > 0 {
 		log.Info("changes spread over runs", "now", total, "later", deferred)
 	}
+	// A run can take a quarter of an hour: show it on the job page now.
+	if id, err := client.StartJob(ctx, "apply", fmt.Sprintf("%d件を反映中(残り%d件は次回以降)", total, deferred), started); err != nil {
+		log.Warn("report job start", "err", err)
+	} else {
+		jobID = id
+	}
 	if err := open(); err != nil {
 		report("failed", err.Error())
 		return err
@@ -148,7 +155,8 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	}
 
 	if res != nil {
-		res.changed = done
+		// Skipped means the share state web has is stale: sync either way.
+		res.changed = done + skipped
 	}
 	detail := fmt.Sprintf("変更 %d件・すでに反映済み %d件・失敗 %d件", done, skipped, len(failures))
 	if deferred > 0 {

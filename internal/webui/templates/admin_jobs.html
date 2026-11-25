@@ -6,7 +6,7 @@
     <thead><tr><th>開始</th><th>種類</th><th>結果</th><th>内容</th></tr></thead>
     <tbody>
     {{range .Jobs}}
-    <tr><td>{{fmtTime .StartedAt}}</td><td>{{.Kind}}</td><td><span class="{{if eq .Result "ok"}}on{{else}}off{{end}}">{{.Result}}</span></td><td>{{.Detail}}</td></tr>
+    <tr><td>{{fmtTime .StartedAt}}</td><td>{{.Kind}}</td><td>{{if eq .Result "running"}}<span class="muted">実行中</span>{{else}}<span class="{{if eq .Result "ok"}}on{{else}}off{{end}}">{{.Result}}</span>{{end}}</td><td>{{.Detail}}</td></tr>
     {{else}}
     <tr><td colspan="4">まだありません</td></tr>
     {{end}}
