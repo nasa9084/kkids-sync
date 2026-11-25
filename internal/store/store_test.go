@@ -93,3 +93,26 @@ func TestLinkProfiles(t *testing.T) {
 		t.Error("relinking to another ID was allowed")
 	}
 }
+
+func TestUpdateMember(t *testing.T) {
+	ctx := context.Background()
+	db, _ := newTestStore(t)
+	m, err := db.AddMember(ctx, Member{Name: "自分", Email: "wrong@example.com", Role: RoleAdmin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Email = "owner@example.com"
+	if err := db.UpdateMember(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.MemberByEmail(ctx, "wrong@example.com"); err != ErrNotFound {
+		t.Fatalf("old address still found: %v", err)
+	}
+	got, err := db.MemberByEmail(ctx, "owner@example.com")
+	if err != nil || got.ID != m.ID {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if err := db.UpdateMember(ctx, Member{ID: 999, Name: "x", Email: "x@example.com", Role: RoleAdmin}); err != ErrNotFound {
+		t.Fatalf("missing member: %v", err)
+	}
+}

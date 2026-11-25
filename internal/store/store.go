@@ -133,6 +133,30 @@ func (s *Store) AddMember(ctx context.Context, m Member) (Member, error) {
 	return m, err
 }
 
+// MemberByID finds a member by ID.
+func (s *Store) MemberByID(ctx context.Context, id int64) (Member, error) {
+	return s.scanMember(s.db.QueryRowContext(ctx,
+		`SELECT id, name, email, role, COALESCE(kids_profile_id, ''), COALESCE(kids_profile_name, '') FROM members WHERE id = ?`, id))
+}
+
+// UpdateMember overwrites a member's fields. Selections stay with the member.
+func (s *Store) UpdateMember(ctx context.Context, m Member) error {
+	if m.Role != RoleFamily && m.Role != RoleAdmin {
+		return fmt.Errorf("invalid role %q", m.Role)
+	}
+	m.Email = strings.TrimSpace(m.Email)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE members SET name = ?, email = ?, role = ?, kids_profile_id = ?, kids_profile_name = ? WHERE id = ?`,
+		m.Name, m.Email, string(m.Role), nullString(m.KidsProfileID), nullString(m.KidsProfileName), m.ID)
+	if err != nil {
+		return fmt.Errorf("update member: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // MemberByEmail finds a member by email, ignoring case.
 func (s *Store) MemberByEmail(ctx context.Context, email string) (Member, error) {
 	return s.scanMember(s.db.QueryRowContext(ctx,

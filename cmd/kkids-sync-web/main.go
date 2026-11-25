@@ -84,6 +84,8 @@ func run(log *slog.Logger, args []string, out io.Writer) error {
 			return memberAdd(ctx, db, args[2:], out)
 		case "list":
 			return memberList(ctx, db, out)
+		case "edit":
+			return memberEdit(ctx, db, args[2:], out)
 		}
 	}
 	return usage()
@@ -189,6 +191,57 @@ func memberAdd(ctx context.Context, db *store.Store, args []string, out io.Write
 	}
 	fmt.Fprintf(out, "added %s (%s) as %s, id %d\n", m.Name, m.Email, m.Role, m.ID)
 	return nil
+}
+
+func memberEdit(ctx context.Context, db *store.Store, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("member edit", flag.ContinueOnError)
+	id := fs.Int64("id", 0, "member ID from member list (required)")
+	name := fs.String("name", "", "new display name")
+	email := fs.String("email", "", "new sign-in address")
+	role := fs.String("role", "", "family or admin")
+	profile := fs.String("kids-profile", "", `Amazon Kids profile ID; "" clears it`)
+	profileName := fs.String("kids-profile-name", "", `Amazon Kids profile name; "" clears it`)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == 0 {
+		return errors.New("-id is required (see member list)")
+	}
+	m, err := db.MemberByID(ctx, *id)
+	if err != nil {
+		return fmt.Errorf("member %d: %w", *id, err)
+	}
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "name":
+			m.Name = *name
+		case "email":
+			m.Email = *email
+		case "role":
+			m.Role = store.Role(*role)
+		case "kids-profile":
+			m.KidsProfileID = *profile
+		case "kids-profile-name":
+			m.KidsProfileName = *profileName
+			if !isSet(fs, "kids-profile") {
+				m.KidsProfileID = "" // relink by the new name
+			}
+		}
+	})
+	if m.Name == "" || m.Email == "" {
+		return errors.New("name and email cannot be empty")
+	}
+	if err := db.UpdateMember(ctx, m); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "updated %d: %s (%s) as %s\n", m.ID, m.Name, m.Email, m.Role)
+	return nil
+}
+
+func isSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) { set = set || f.Name == name })
+	return set
 }
 
 func memberList(ctx context.Context, db *store.Store, out io.Writer) error {
