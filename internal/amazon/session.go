@@ -13,9 +13,11 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/mxschmitt/playwright-go"
 
@@ -253,7 +255,19 @@ func (s *Session) ReadLibrary(ctx context.Context, o ReadLibraryOptions) (*Snaps
 			s.log.Info("list page", "pages", pages, "cursor", cursor)
 			incremental := o.Known != nil && cursor != cursorLast && col.tailKnown(o.Known, knownTail)
 			if cursor == cursorLast || incremental {
-				if err := s.searchOnce(ctx, col, searched, o.PageTimeout); err != nil {
+				// A query that finds nothing comes back without share
+				// state; try another title.
+				var err error
+				for try := 0; try < 3; try++ {
+					if err = s.searchOnce(ctx, col, searched, o.PageTimeout); err == nil || ctx.Err() != nil {
+						break
+					}
+					s.log.Warn("search for share state", "try", try+1, "err", err)
+					if err := Sleep(ctx, 2*time.Second, 5*time.Second); err != nil {
+						return col.snapshot(), err
+					}
+				}
+				if err != nil {
 					return col.snapshot(), err
 				}
 				snap := col.snapshot()
@@ -304,12 +318,26 @@ func (s *Session) searchOnce(ctx context.Context, col *collector, searched <-cha
 	if len(snap.Books) == 0 {
 		return errors.New("no books to search for")
 	}
-	title := []rune(snap.Books[rand.IntN(len(snap.Books))].Title)
-	query := string(title[:min(len(title), 2+rand.IntN(3))])
+	// A fragment with symbols ("O/A") can find nothing: take letters only.
+	var query string
+	for range 20 {
+		title := []rune(snap.Books[rand.IntN(len(snap.Books))].Title)
+		q := title[:min(len(title), 2+rand.IntN(3))]
+		if !slices.ContainsFunc(q, func(r rune) bool { return !unicode.IsLetter(r) }) {
+			query = string(q)
+			break
+		}
+	}
+	if query == "" {
+		query = string([]rune(snap.Books[0].Title)[:2])
+	}
 
 	field := s.page.Locator(searchFieldSelector)
 	if err := s.openSearch(ctx, field); err != nil {
 		return err
+	}
+	if err := field.Fill(""); err != nil { // a retry starts from an empty box
+		return fmt.Errorf("clear search field: %w", err)
 	}
 	if err := field.Click(); err != nil {
 		return fmt.Errorf("focus search field: %w", err)

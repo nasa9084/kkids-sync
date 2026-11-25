@@ -129,7 +129,7 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 			continue
 		}
 		for _, step := range steps(d) {
-			changed, err := toggle(ctx, log, s, profile, step, d.Titles[step.asin], &listBudget)
+			changed, err := toggle(ctx, log, s, profile, names[profile], step, d.Titles[step.asin], &listBudget)
 			switch {
 			case err != nil:
 				if ctx.Err() != nil {
@@ -327,7 +327,7 @@ const listFallbacks = 5
 
 // toggle tries each query until the search shows the book, then (while
 // *listBudget lasts) scrolls the list for it.
-func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile string, st step, title string, listBudget *int) (bool, error) {
+func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile, name string, st step, title string, listBudget *int) (bool, error) {
 	var err error
 	for i, q := range queries(title) {
 		if i > 0 {
@@ -350,5 +350,14 @@ func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile st
 	if err := amazon.Sleep(ctx, 2*time.Second, 5*time.Second); err != nil {
 		return false, err
 	}
-	return s.ToggleInList(ctx, profile, st.asin, st.add)
+	changed, err := s.ToggleInList(ctx, profile, st.asin, st.add)
+	// The scrolled list holds hundreds of books in the page (it ran Chromium
+	// out of memory once): load the page afresh and select the child again.
+	if rerr := s.OpenAddContent(ctx); rerr != nil {
+		return changed, errors.Join(err, rerr)
+	}
+	if rerr := s.SelectChild(ctx, profile, name); rerr != nil {
+		return changed, errors.Join(err, rerr)
+	}
+	return changed, err
 }
