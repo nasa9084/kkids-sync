@@ -39,6 +39,7 @@ func main() {
 	start := flag.String("start", defaultStart, "page to open first")
 	install := flag.Bool("install", false, "download the Playwright driver and Chromium, then exit")
 	allowWrites := flag.Bool("allow-writes", false, "inspect: let dashboard writes through (toggles take effect) and record them")
+	snapshotsFlag := flag.Bool("snapshots", false, "inspect: after the first Enter, keep recording the open pages on each Enter until q")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "usage: poc [flags] login|inspect\n")
 		flag.PrintDefaults()
@@ -64,12 +65,12 @@ func main() {
 	if err := os.MkdirAll(*dir, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	if err := run(mode, *dir, *start, *allowWrites); err != nil {
+	if err := run(mode, *dir, *start, *allowWrites, *snapshotsFlag); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(mode, dir, start string, allowWrites bool) error {
+func run(mode, dir, start string, allowWrites, snapshots bool) error {
 	statePath := filepath.Join(dir, "storage-state.json")
 	stamp := time.Now().Format("20060102-150405")
 	policy := guard.Policy{ReadOnly: mode == "inspect" && !allowWrites}
@@ -191,6 +192,21 @@ func run(mode, dir, start string, allowWrites bool) error {
 		}
 		if err := dumpPages(ctx, dir, stamp); err != nil {
 			log.Printf("dump pages: %v", err)
+		}
+		if snapshots {
+			// Record more states on demand: each Enter dumps the open pages
+			// again; "q" ends the session.
+			in := bufio.NewReader(os.Stdin)
+			for i := 1; ; i++ {
+				fmt.Println("\n画面を変えたら Enter で記録します。終わるときは q を入力して Enter")
+				line, _ := in.ReadString('\n')
+				if strings.TrimSpace(line) == "q" {
+					break
+				}
+				if err := dumpPages(ctx, dir, fmt.Sprintf("%s-%02d", stamp, i)); err != nil {
+					log.Printf("dump pages: %v", err)
+				}
+			}
 		}
 		captured.wg.Wait()
 		if err := ctx.Tracing().Stop(tracePath); err != nil {
