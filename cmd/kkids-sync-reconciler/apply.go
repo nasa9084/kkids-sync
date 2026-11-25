@@ -15,10 +15,6 @@ import (
 	"github.com/nasa9084/kkids-sync/internal/titles"
 )
 
-// errTooManyChanges stops a plan that is larger than expected; a person
-// must look at it first (exit code 4).
-var errTooManyChanges = errors.New("too many changes")
-
 // apply fetches the plan from web and carries it out on the dashboard, one
 // toggle at a time. Every change is reported as one job.
 // applyResult tells the caller whether apply touched the dashboard.
@@ -80,20 +76,13 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	if err != nil {
 		return err
 	}
-	plan, total, removes, deferred := limitAdds(plan, maxChanges)
+	plan, total, deferred := limitPlan(plan, maxChanges)
 	if total == 0 {
 		log.Info("nothing to apply")
 		return nil
 	}
-	// Many removals at once look like a mistake (or a fresh database), so
-	// they stop the run. Many additions (a whole series) are fine: they are
-	// done maxChanges at a time, the rest on the next runs.
-	if removes > maxChanges {
-		report("stopped", fmt.Sprintf("外す本が%d件あり、上限%d件を超えたため実行しませんでした", removes, maxChanges))
-		return fmt.Errorf("%w: %d removals planned, limit %d", errTooManyChanges, removes, maxChanges)
-	}
 	if deferred > 0 {
-		log.Info("additions spread over runs", "now", total-removes, "later", deferred)
+		log.Info("changes spread over runs", "now", total, "later", deferred)
 	}
 	if err := open(); err != nil {
 		report("failed", err.Error())
@@ -160,33 +149,45 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	return nil
 }
 
-// limitAdds keeps every removal and at most max additions, taken in turn
-// from each profile so that one member's big series does not hold up the
-// others. It returns the trimmed plan, the number of changes in it, how many
-// of them are removals, and how many additions were left for later.
-func limitAdds(plan map[string]store.Diff, max int) (out map[string]store.Diff, total, removes, deferred int) {
-	out = map[string]store.Diff{}
+// limitPlan keeps at most max changes for this run, removals first, taking
+// turns between profiles so that one member's big change (a whole series,
+// an emptied shelf) does not hold up the others. The rest is left for the
+// next runs. It returns the trimmed plan, its size, and how many changes
+// were left.
+func limitPlan(plan map[string]store.Diff, max int) (out map[string]store.Diff, total, deferred int) {
 	profiles := make([]string, 0, len(plan))
-	adds := 0
+	all := 0
+	out = map[string]store.Diff{}
 	for p, d := range plan {
 		profiles = append(profiles, p)
-		removes += len(d.Remove)
-		adds += len(d.Add)
-		out[p] = store.Diff{Remove: d.Remove, Titles: d.Titles}
+		all += len(d.Add) + len(d.Remove)
+		out[p] = store.Diff{Titles: d.Titles}
 	}
 	sort.Strings(profiles)
-	kept := 0
-	for i := 0; kept < max && kept < adds; i++ {
-		for _, p := range profiles {
-			if i < len(plan[p].Add) && kept < max {
-				d := out[p]
-				d.Add = append(d.Add, plan[p].Add[i])
-				out[p] = d
-				kept++
+	take := func(get func(store.Diff) []string, put func(*store.Diff, string)) {
+		for i := 0; total < max; i++ {
+			any := false
+			for _, p := range profiles {
+				list := get(plan[p])
+				if i >= len(list) {
+					continue
+				}
+				any = true
+				if total < max {
+					d := out[p]
+					put(&d, list[i])
+					out[p] = d
+					total++
+				}
+			}
+			if !any {
+				return
 			}
 		}
 	}
-	return out, removes + kept, removes, adds - kept
+	take(func(d store.Diff) []string { return d.Remove }, func(d *store.Diff, a string) { d.Remove = append(d.Remove, a) })
+	take(func(d store.Diff) []string { return d.Add }, func(d *store.Diff, a string) { d.Add = append(d.Add, a) })
+	return out, total, all - total
 }
 
 func unlinked(ps []store.Profile) bool {

@@ -219,3 +219,29 @@ func TestSeriesShelfAll(t *testing.T) {
 		t.Errorf("volume 2 not on the shelf: %s", rec.Body.String())
 	}
 }
+
+func TestUnshelfSeriesAndClear(t *testing.T) {
+	_, as := setup(t)
+	mom := as("mom@example.com")
+	post := map[string]string{"Origin": "http://example.com"}
+	do(mom, "POST", "/series/1/shelf-all", post)
+	if rec := do(mom, "GET", "/series/1", nil); !strings.Contains(rec.Body.String(), "全部本棚から外す(2冊)") {
+		t.Fatalf("series page: %s", rec.Body.String())
+	}
+	if rec := do(mom, "POST", "/series/1/unshelf-all", post); rec.Code != 303 {
+		t.Fatalf("unshelf-all: %d", rec.Code)
+	}
+	if rec := do(mom, "GET", "/shelf", nil); !strings.Contains(rec.Body.String(), "本棚の本 0冊") {
+		t.Errorf("shelf after unshelf-all: %s", rec.Body.String())
+	}
+	do(mom, "POST", "/series/1/shelf-all", post)
+	if rec := do(mom, "GET", "/shelf", nil); !strings.Contains(rec.Body.String(), "本棚を全部空にする") {
+		t.Fatalf("no clear button: %s", rec.Body.String())
+	}
+	if rec := do(mom, "POST", "/shelf/clear", post); rec.Code != 303 {
+		t.Fatalf("clear: %d", rec.Code)
+	}
+	if rec := do(mom, "GET", "/shelf", nil); !strings.Contains(rec.Body.String(), "本棚の本 0冊") {
+		t.Errorf("shelf after clear: %s", rec.Body.String())
+	}
+}

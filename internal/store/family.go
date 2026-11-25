@@ -203,3 +203,13 @@ func (s *Store) SetVisibility(ctx context.Context, asin string, visible bool) er
 	_, err := s.db.ExecContext(ctx, `INSERT INTO visibility (asin, visible) VALUES (?, ?) ON CONFLICT (asin) DO UPDATE SET visible = excluded.visible`, asin, v)
 	return err
 }
+
+// UnselectAll empties a member's shelf. It returns how many books came off.
+func (s *Store) UnselectAll(ctx context.Context, memberID int64) (int, error) {
+	r, err := s.db.ExecContext(ctx, `DELETE FROM selections WHERE member_id = ?`, memberID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := r.RowsAffected()
+	return int(n), nil
+}

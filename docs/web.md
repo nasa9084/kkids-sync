@@ -84,5 +84,5 @@ checks the ID the page asks for), searches each
 book by title and presses its toggle. The guard lets through only the one
 write it expects (that child, that book, that direction) and blocks
 anything else. At the end it clears the filter again.
-Plans larger than `MAX_CHANGES` (default 50) are refused
-with exit code 4.
+Each run makes at most `MAX_CHANGES` (default 50) changes; the rest follow
+on the next run. Nothing is removed before `bootstrap`.

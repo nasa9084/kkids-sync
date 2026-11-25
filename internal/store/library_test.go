@@ -85,13 +85,13 @@ func TestPlanAndBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// No selections yet: everything shared in the library would be removed,
-	// but never the Kindle Unlimited title outside it.
+	// No selections yet, and not bootstrapped: nothing is removed (it would
+	// be everything shared).
 	plan, err := s.Plan(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (map[string]Diff{"P1": {Remove: []string{"A", "B"}, Titles: map[string]string{"A": "title A", "B": "title B"}}}); !reflect.DeepEqual(plan, want) {
+	if want := (map[string]Diff{"P1": {}}); !reflect.DeepEqual(plan, want) {
 		t.Errorf("plan before bootstrap = %+v, want %+v", plan, want)
 	}
 

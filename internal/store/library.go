@@ -180,6 +180,16 @@ func (s *Store) Plan(ctx context.Context) (map[string]Diff, error) {
 		return nil, err
 	}
 
+	// Before bootstrap nobody has selected anything yet; removing what is not
+	// selected would remove every share.
+	var boot int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM settings WHERE key = 'bootstrapped'`).Scan(&boot); err != nil {
+		return nil, err
+	}
+	if boot == 0 {
+		sharedManaged = nil
+	}
+
 	plan := map[string]Diff{}
 	for p := range profiles {
 		var d Diff
@@ -234,6 +244,12 @@ func (s *Store) BootstrapFromShared(ctx context.Context) (selected int, err erro
 	if n > 0 {
 		return 0, fmt.Errorf("there are %d selections already", n)
 	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM settings WHERE key = 'bootstrapped'`).Scan(&n); err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		return 0, errors.New("already bootstrapped")
+	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM shared_state`).Scan(&n); err != nil {
 		return 0, err
 	}
@@ -255,6 +271,9 @@ func (s *Store) BootstrapFromShared(ctx context.Context) (selected int, err erro
 		INSERT INTO visibility (asin, visible)
 		SELECT DISTINCT asin, 1 FROM selections WHERE true
 		ON CONFLICT (asin) DO UPDATE SET visible = 1`); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES ('bootstrapped', '1')`); err != nil {
 		return 0, err
 	}
 	return int(added), tx.Commit()

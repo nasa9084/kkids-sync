@@ -65,6 +65,9 @@ func TestAdmin(t *testing.T) {
 		t.Errorf("X = %+v", b)
 	}
 
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES ('bootstrapped', '1')`); err != nil {
+		t.Fatal(err)
+	}
 	o, err := s.Overview(ctx)
 	if err != nil {
 		t.Fatal(err)
