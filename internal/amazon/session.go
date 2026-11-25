@@ -36,7 +36,13 @@ var (
 )
 
 // searchFieldSelector is the dashboard's search box on the add-content page.
-const searchFieldSelector = "#content-management-search-field"
+// It is hidden until the search button next to the filter button is pressed;
+// once open, that button is labelled "検索を終了".
+const (
+	searchFieldSelector   = "#content-management-search-field"
+	searchOpenSelector    = `button[aria-label^="検索"]:not([aria-label="検索を終了"])`
+	searchOpenWaitTimeout = 10 * time.Second
+)
 
 // Options configures a Session.
 type Options struct {
@@ -274,6 +280,9 @@ func (s *Session) searchOnce(ctx context.Context, col *collector, searched <-cha
 	query := string(title[:min(len(title), 2+rand.IntN(3))])
 
 	field := s.page.Locator(searchFieldSelector)
+	if err := s.openSearch(ctx, field); err != nil {
+		return err
+	}
 	if err := field.Click(); err != nil {
 		return fmt.Errorf("focus search field: %w", err)
 	}
@@ -313,6 +322,24 @@ func (s *Session) searchOnce(ctx context.Context, col *collector, searched <-cha
 	}
 	s.log.Info("share state read from search", "children", len(have))
 	return nil
+}
+
+// openSearch shows the search box if it is not open yet.
+func (s *Session) openSearch(ctx context.Context, field playwright.Locator) error {
+	if visible, _ := field.IsVisible(); visible {
+		return nil
+	}
+	button := s.page.Locator(searchOpenSelector).First()
+	if err := button.Click(playwright.LocatorClickOptions{Timeout: playwright.Float(float64(searchOpenWaitTimeout.Milliseconds()))}); err != nil {
+		return fmt.Errorf("open search: %w", err)
+	}
+	if err := field.WaitFor(playwright.LocatorWaitForOptions{
+		State:   playwright.WaitForSelectorStateVisible,
+		Timeout: playwright.Float(float64(searchOpenWaitTimeout.Milliseconds())),
+	}); err != nil {
+		return fmt.Errorf("search field did not appear: %w", err)
+	}
+	return Sleep(ctx, 300*time.Millisecond, 900*time.Millisecond)
 }
 
 func tail(id string) string {
