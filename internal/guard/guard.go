@@ -28,7 +28,8 @@ func (d Decision) String() string {
 
 // Policy holds the rules for one browser session.
 type Policy struct {
-	// ReadOnly blocks state-changing methods sent to the parent dashboard.
+	// ReadOnly blocks state-changing methods sent to the parent dashboard,
+	// except POSTs to endpoints whose names say they only read data.
 	// Sign-in still works, because sign-in lives on www.amazon.co.jp.
 	ReadOnly bool
 }
@@ -48,6 +49,12 @@ var parentHosts = []string{
 
 // deniedPath matches paths that must never be requested on an Amazon host.
 var deniedPath = regexp.MustCompile(`(?i)(^|/)(gp/buy|gp/cart|cart|checkout|gp/checkoutportal|gp/aw/c|gp/digital/fiona/.*(delete|deregister)|hz/mycd/.*(delete|deregister|return))(/|$|\?)`)
+
+// readOnlyPost matches dashboard endpoints that use POST only to fetch data
+// (for example /ajax/get-explore-page-data). In read-only mode these pass;
+// every other state-changing request to the dashboard is blocked and logged,
+// which also reveals the names of the write endpoints.
+var readOnlyPost = regexp.MustCompile(`(?i)^/ajax/(get|fetch|list|search|load|query)[-_]`)
 
 var mutatingMethods = map[string]bool{
 	"POST":   true,
@@ -73,7 +80,7 @@ func (p Policy) Check(rawURL, method string, isNavigation bool) (Decision, strin
 	if isNavigation && !hostIn(host, navigationHosts) {
 		return Block, "navigation outside allowlist"
 	}
-	if p.ReadOnly && mutatingMethods[strings.ToUpper(method)] && hostIn(host, parentHosts) {
+	if p.ReadOnly && mutatingMethods[strings.ToUpper(method)] && hostIn(host, parentHosts) && !readOnlyPost.MatchString(u.Path) {
 		return Block, "read-only mode"
 	}
 	return Allow, ""

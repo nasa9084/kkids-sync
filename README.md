@@ -9,7 +9,7 @@ owner's Amazon account.
   Kids parent dashboard and adds or removes only the difference.
 - The reconciler is the only component that holds the Amazon session.
 
-Status: proof of concept. Nothing here is ready for use.
+Status: proof of concept. Nothing here is ready for use. See [docs/poc.md](docs/poc.md) to run the PoC (and to remove everything it installs).
 
 > This project automates the owner's own account through a browser. It is not
 > affiliated with or endorsed by Amazon.
