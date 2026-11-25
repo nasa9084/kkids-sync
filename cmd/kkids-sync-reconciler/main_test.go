@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/nasa9084/kkids-sync/internal/amazon"
@@ -42,7 +43,12 @@ func TestStepsAndQuery(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("steps = %v, want %v", got, want)
 	}
-	if q := query("鬼灯さん家のアネキ(2) (角川コミックス・エース・エクストラ)"); q != "鬼灯さん家のアネキ(2)" {
-		t.Errorf("query = %q", q)
+	qs := queries("横浜駅SF(3) (角川コミックス・エース)")
+	wantQ := []string{"横浜駅SF(3)", "横浜駅SF", "横浜駅SF(3) (角川コミックス・エース)"}
+	if !slices.Equal(qs, wantQ) {
+		t.Errorf("queries = %q, want %q", qs, wantQ)
+	}
+	if got := queries("単発の本"); !slices.Equal(got, []string{"単発の本"}) {
+		t.Errorf("queries = %q", got)
 	}
 }

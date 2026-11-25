@@ -115,7 +115,7 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 			continue
 		}
 		for _, step := range steps(d) {
-			changed, err := s.Toggle(ctx, profile, step.asin, query(d.Titles[step.asin]), step.add)
+			changed, err := toggle(ctx, log, s, profile, step, d.Titles[step.asin])
 			switch {
 			case err != nil:
 				if ctx.Err() != nil {
@@ -220,10 +220,46 @@ func steps(d store.Diff) []step {
 
 // query is what to type into the dashboard's search box for a title: the
 // title without its label, as a person would type it.
-func query(title string) string {
-	q := titles.DisplayTitle(title)
-	if r := []rune(q); len(r) > 40 {
-		q = string(r[:40])
+// queries lists what to type into the dashboard's search for a title, in
+// order: the title without its label, the series name, the full title.
+// The dashboard's search does not find every title by every spelling (for
+// example "横浜駅SF(3)"), so the later ones are fallbacks.
+func queries(title string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(q string) {
+		q = strings.TrimSpace(q)
+		if r := []rune(q); len(r) > 40 {
+			q = string(r[:40])
+		}
+		if q != "" && !seen[q] {
+			seen[q] = true
+			out = append(out, q)
+		}
 	}
-	return q
+	add(titles.DisplayTitle(title))
+	if name, _, ok := titles.ParseSeries(title); ok {
+		add(name)
+	}
+	add(title)
+	return out
+}
+
+// toggle tries each query until the search shows the book.
+func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile string, st step, title string) (bool, error) {
+	var err error
+	for i, q := range queries(title) {
+		if i > 0 {
+			log.Info("retrying search", "asin", st.asin, "query", q)
+			if err := amazon.Sleep(ctx, 2*time.Second, 5*time.Second); err != nil {
+				return false, err
+			}
+		}
+		var changed bool
+		changed, err = s.Toggle(ctx, profile, st.asin, q, st.add)
+		if !errors.Is(err, amazon.ErrNotInSearch) {
+			return changed, err
+		}
+	}
+	return false, err
 }

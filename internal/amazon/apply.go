@@ -424,6 +424,6 @@ func (s *Session) titleFromSearch(ctx context.Context, w *responseWaiter, childI
 				return it.Title, nil
 			}
 		}
-		return "", fmt.Errorf("%s: %w", asin, ErrNotInSearch)
+		return "", fmt.Errorf("%s: %w (%d results)", asin, ErrNotInSearch, len(resp.PurchasedItemsMetadataList))
 	}
 }
