@@ -26,8 +26,9 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 		return errors.New("apply needs -web")
 	}
 	started := time.Now()
+	var jobID int64 // set once the run is shown as running
 	report := func(result, detail string) {
-		if err := client.ReportJob(context.WithoutCancel(ctx), internalapi.JobReport{Kind: "apply", Result: result, Detail: detail, StartedAt: started}); err != nil {
+		if err := client.ReportJob(context.WithoutCancel(ctx), internalapi.JobReport{ID: jobID, Kind: "apply", Result: result, Detail: detail, StartedAt: started}); err != nil {
 			log.Warn("report job", "err", err)
 		}
 	}
@@ -95,12 +96,19 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	if deferred > 0 {
 		log.Info("changes spread over runs", "now", total, "later", deferred)
 	}
+	// A run can take a quarter of an hour: show it on the job page now.
+	if id, err := client.StartJob(ctx, "apply", fmt.Sprintf("%d件を反映中(残り%d件は次回以降)", total, deferred), started); err != nil {
+		log.Warn("report job start", "err", err)
+	} else {
+		jobID = id
+	}
 	if err := open(); err != nil {
 		report("failed", err.Error())
 		return err
 	}
 
 	var done, skipped int
+	listBudget := listFallbacks
 	var failures []string
 	profiles := make([]string, 0, len(plan))
 	for p := range plan {
@@ -121,7 +129,7 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 			continue
 		}
 		for _, step := range steps(d) {
-			changed, err := toggle(ctx, log, s, profile, step, d.Titles[step.asin])
+			changed, err := toggle(ctx, log, s, profile, step, d.Titles[step.asin], &listBudget)
 			switch {
 			case err != nil:
 				if ctx.Err() != nil {
@@ -147,7 +155,8 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 	}
 
 	if res != nil {
-		res.changed = done
+		// Skipped means the share state web has is stale: sync either way.
+		res.changed = done + skipped
 	}
 	detail := fmt.Sprintf("変更 %d件・すでに反映済み %d件・失敗 %d件", done, skipped, len(failures))
 	if deferred > 0 {
@@ -312,8 +321,13 @@ func queries(title string) []string {
 	return out
 }
 
-// toggle tries each query until the search shows the book.
-func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile string, st step, title string) (bool, error) {
+// listFallbacks is how many books per run may be looked for by scrolling
+// the list when no search shows them; each can take a few minutes.
+const listFallbacks = 5
+
+// toggle tries each query until the search shows the book, then (while
+// *listBudget lasts) scrolls the list for it.
+func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile string, st step, title string, listBudget *int) (bool, error) {
 	var err error
 	for i, q := range queries(title) {
 		if i > 0 {
@@ -328,5 +342,13 @@ func toggle(ctx context.Context, log *slog.Logger, s *amazon.Session, profile st
 			return changed, err
 		}
 	}
-	return false, err
+	if *listBudget <= 0 {
+		return false, err
+	}
+	*listBudget--
+	log.Info("looking for the book in the list", "asin", st.asin, "search", err)
+	if err := amazon.Sleep(ctx, 2*time.Second, 5*time.Second); err != nil {
+		return false, err
+	}
+	return s.ToggleInList(ctx, profile, st.asin, st.add)
 }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/nasa9084/kkids-sync/internal/store"
 )
@@ -48,8 +49,18 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("Plan = %+v, want %+v", plan, want)
 	}
 
-	if err := c.ReportJob(ctx, JobReport{Kind: "apply", Result: "ok", Detail: "追加 1"}); err != nil {
+	id, err := c.StartJob(ctx, "apply", "1件を反映中", time.Now())
+	if err != nil || id == 0 {
+		t.Fatalf("StartJob = %d, %v", id, err)
+	}
+	if jobs, _ := db.Jobs(ctx, 10); jobs[0].ID != id || jobs[0].Result != store.JobRunning || !jobs[0].FinishedAt.IsZero() {
+		t.Errorf("running job = %+v", jobs[0])
+	}
+	if err := c.ReportJob(ctx, JobReport{ID: id, Kind: "apply", Result: "ok", Detail: "追加 1"}); err != nil {
 		t.Errorf("ReportJob: %v", err)
+	}
+	if jobs, _ := db.Jobs(ctx, 10); len(jobs) != 2 || jobs[0].ID != id || jobs[0].Result != "ok" || jobs[0].FinishedAt.IsZero() {
+		t.Errorf("finished job = %+v (the running row is updated, not added)", jobs)
 	}
 	if err := c.ReportJob(ctx, JobReport{}); err == nil {
 		t.Error("empty job report accepted")

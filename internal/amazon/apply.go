@@ -26,6 +26,9 @@ var ErrAmbiguous = errors.New("more than one toggle with this title")
 // ErrNotInSearch means a search did not return the book.
 var ErrNotInSearch = errors.New("book not found by search")
 
+// ErrNotInList means the book did not show up while scrolling the list.
+var ErrNotInList = errors.New("book not found in the list")
+
 // expectedWrite is the only write the guard lets through while a toggle is
 // being pressed.
 type expectedWrite struct {
@@ -347,7 +350,62 @@ func (s *Session) Toggle(ctx context.Context, childID, asin, query string, add b
 	if err != nil {
 		return false, err
 	}
+	return s.pressByTitle(ctx, childID, asin, title, add)
+}
 
+// maxListPages bounds the list fallback: about 100 books a page.
+const maxListPages = 40
+
+// ToggleInList is the fallback for books the search does not show (it
+// returns at most ten books, so a volume of a long series can be missing):
+// it closes the search and scrolls the child's list, as a person would,
+// until the book is loaded, then presses its toggle.
+func (s *Session) ToggleInList(ctx context.Context, childID, asin string, add bool) (changed bool, err error) {
+	list := s.waitFor("/ajax/get-additional-content", 30*time.Second)
+	defer list.stop()
+	closeSearch := s.page.Locator(`button[aria-label="検索を終了"]`).First()
+	if visible, _ := closeSearch.IsVisible(); visible {
+		if err := closeSearch.Click(); err != nil {
+			return false, fmt.Errorf("close search: %w", err)
+		}
+	} else if err := s.scrollToEnd(ctx); err != nil {
+		// No search to close (and a reload would drop the filter): load more.
+		return false, err
+	}
+	for page := 1; page <= maxListPages; page++ {
+		r, err := list.next(ctx)
+		if err != nil {
+			return false, fmt.Errorf("list for %s: %w", asin, err)
+		}
+		var req listRequest
+		if err := json.Unmarshal(r.reqBody, &req); err != nil {
+			return false, fmt.Errorf("list request: %w", err)
+		}
+		if len(req.ChildIDList) != 1 || req.ChildIDList[0] != childID {
+			return false, fmt.Errorf("list was not limited to …%s", tail(childID))
+		}
+		var resp listResponse
+		if err := json.Unmarshal(r.body, &resp); err != nil {
+			return false, fmt.Errorf("list response: %w", err)
+		}
+		for _, it := range resp.PurchasedItemsMetadataList {
+			if it.ASIN == asin && it.Category == contentTypeEbook {
+				return s.pressByTitle(ctx, childID, asin, it.Title, add)
+			}
+		}
+		if c := resp.ContentTypeToCursorMap[contentTypeEbook]; c == "" || c == cursorLast {
+			break
+		}
+		if err := s.scrollToEnd(ctx); err != nil {
+			return false, err
+		}
+	}
+	return false, fmt.Errorf("%s: %w", asin, ErrNotInList)
+}
+
+// pressByTitle presses the toggle of the book with this title (as the page
+// shows it) for childID, expecting exactly that write.
+func (s *Session) pressByTitle(ctx context.Context, childID, asin, title string, add bool) (changed bool, err error) {
 	toggle := s.page.GetByRole("switch", playwright.PageGetByRoleOptions{Name: title + ", 本", Exact: playwright.Bool(true)})
 	if err := toggle.First().WaitFor(playwright.LocatorWaitForOptions{Timeout: playwright.Float(15000)}); err != nil {
 		return false, fmt.Errorf("toggle for %s: %w", asin, err)
@@ -444,7 +502,7 @@ func (s *Session) titleFromSearch(ctx context.Context, w *responseWaiter, childI
 		seen += len(resp.PurchasedItemsMetadataList)
 		cursor := resp.ContentTypeToCursorMap[contentTypeEbook]
 		if cursor == "" || cursor == cursorLast || len(resp.PurchasedItemsMetadataList) == 0 || page >= maxSearchPages {
-			return "", fmt.Errorf("%s: %w (%d results)", asin, ErrNotInSearch, seen)
+			return "", fmt.Errorf("%s: %w (%d results, %d pages, cursor %q)", asin, ErrNotInSearch, seen, page, tail(cursor))
 		}
 		// More results: scroll like a person would, and read the next page.
 		if err := s.scrollToEnd(ctx); err != nil {

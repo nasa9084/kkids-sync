@@ -32,13 +32,15 @@ import (
 type Store interface {
 	ApplySnapshot(ctx context.Context, snap store.LibrarySnapshot) (store.SnapshotResult, error)
 	Plan(ctx context.Context) (map[string]store.Diff, error)
-	AddJob(ctx context.Context, kind, result, detail string, started time.Time) error
+	RecordJob(ctx context.Context, id int64, kind, result, detail string, started time.Time) (int64, error)
 	Profiles(ctx context.Context) ([]store.Profile, error)
 	LinkProfiles(ctx context.Context, ids map[string]string) (int, error)
 }
 
 // JobReport is the body of POST /internal/v1/jobs.
 type JobReport struct {
+	// ID, when set, updates the job StartJob created instead of adding one.
+	ID        int64     `json:"id,omitempty"`
 	Kind      string    `json:"kind"`
 	Result    string    `json:"result"`
 	Detail    string    `json:"detail"`
@@ -85,12 +87,15 @@ func Handler(db Store, token string, log *slog.Logger) http.Handler {
 			http.Error(w, "bad job report", http.StatusBadRequest)
 			return
 		}
-		if err := db.AddJob(r.Context(), j.Kind, j.Result, j.Detail, j.StartedAt); err != nil {
+		id, err := db.RecordJob(r.Context(), j.ID, j.Kind, j.Result, j.Detail, j.StartedAt)
+		if err != nil {
 			log.Error("add job", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, struct{}{})
+		writeJSON(w, struct {
+			ID int64 `json:"id"`
+		}{id})
 	})
 	mux.HandleFunc("GET /internal/v1/profiles", func(w http.ResponseWriter, r *http.Request) {
 		ps, err := db.Profiles(r.Context())
@@ -198,6 +203,16 @@ func (c *Client) Plan(ctx context.Context) (map[string]store.Diff, error) {
 // ReportJob records a job in web's history.
 func (c *Client) ReportJob(ctx context.Context, j JobReport) error {
 	return c.do(ctx, http.MethodPost, "/internal/v1/jobs", j, nil)
+}
+
+// StartJob records a job as running and returns its id, for the final
+// ReportJob to update.
+func (c *Client) StartJob(ctx context.Context, kind, detail string, started time.Time) (int64, error) {
+	var res struct {
+		ID int64 `json:"id"`
+	}
+	err := c.do(ctx, http.MethodPost, "/internal/v1/jobs", JobReport{Kind: kind, Result: store.JobRunning, Detail: detail, StartedAt: started}, &res)
+	return res.ID, err
 }
 
 // Profiles fetches the family members' profile names and IDs.
