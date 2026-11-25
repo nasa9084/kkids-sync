@@ -36,7 +36,7 @@ func main() {
 	maxPages := flag.Int("max-pages", 60, "sync: give up after this many list pages")
 	full := flag.Bool("full", false, "sync: scroll through the whole library instead of stopping at books already in -out")
 	web := flag.String("web", "", "kkids-sync-web internal API base URL, e.g. http://kkids-sync-web:8081")
-	maxChanges := flag.Int("max-changes", 50, "apply: refuse plans with more changes than this")
+	maxChanges := flag.Int("max-changes", 50, "apply: refuse runs that would remove more books than this, and add at most this many per run (the rest on later runs)")
 	flag.BoolVar(&headless, "headless", false, "run Chromium without a window (by default it needs a display, e.g. xvfb-run)")
 	syncEvery := flag.Duration("sync-every", 24*time.Hour, "run: sync the library when the snapshot in -out is older than this")
 	jitter := flag.Duration("jitter", 0, "run: wait a random time up to this before starting")
