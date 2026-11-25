@@ -476,11 +476,17 @@ func pressToggle(toggle playwright.Locator) error {
 // ten volumes per page, ONE PIECE needs more than ten pages.
 const maxSearchPages = 15
 
+// searchPageSize is how many books one search response holds.
+const searchPageSize = 10
+
 func (s *Session) titleFromSearch(ctx context.Context, w *responseWaiter, childID, asin string) (string, error) {
 	seen := 0
 	for page := 1; ; page++ {
 		r, err := w.next(ctx)
 		if err != nil {
+			if page > 1 {
+				return "", fmt.Errorf("%s: %w (%d results, %d pages, no more)", asin, ErrNotInSearch, seen, page-1)
+			}
 			return "", fmt.Errorf("search for %s: %w", asin, err)
 		}
 		var req listRequest
@@ -500,13 +506,15 @@ func (s *Session) titleFromSearch(ctx context.Context, w *responseWaiter, childI
 			}
 		}
 		seen += len(resp.PurchasedItemsMetadataList)
-		cursor := resp.ContentTypeToCursorMap[contentTypeEbook]
-		if cursor == "" || cursor == cursorLast || len(resp.PurchasedItemsMetadataList) == 0 || page >= maxSearchPages {
-			return "", fmt.Errorf("%s: %w (%d results, %d pages, cursor %q)", asin, ErrNotInSearch, seen, page, tail(cursor))
+		// A full page of ten means there may be more: scroll like a person
+		// would, and the page asks for the next ten (dependencyPaginationTokenMap).
+		if len(resp.PurchasedItemsMetadataList) < searchPageSize || page >= maxSearchPages {
+			return "", fmt.Errorf("%s: %w (%d results, %d pages)", asin, ErrNotInSearch, seen, page)
 		}
-		// More results: scroll like a person would, and read the next page.
 		if err := s.scrollToEnd(ctx); err != nil {
 			return "", err
 		}
+		// No further request within a few seconds: that was the last page.
+		w.timeout = 8 * time.Second
 	}
 }
