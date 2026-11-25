@@ -32,6 +32,8 @@ var staticFS embed.FS
 
 const pageSize = 50
 
+var jst = time.FixedZone("JST", 9*60*60)
+
 // askFinishedAfter is when the shelf asks whether a book has been read.
 const askFinishedAfter = 60 * 24 * time.Hour
 
@@ -72,6 +74,17 @@ func New(db Store, coverDir string, log *slog.Logger) (*UI, error) {
 		}
 		u.pages[page] = t
 	}
+	adminFuncs := template.FuncMap{
+		"deref":   func(b *bool) bool { return b != nil && *b },
+		"fmtTime": func(t time.Time) string { return t.In(jst).Format("1/2 15:04") },
+	}
+	for _, page := range []string{"admin_books", "admin_series", "admin_jobs"} {
+		t, err := template.New(page).Funcs(adminFuncs).ParseFS(templateFS, "templates/admin_layout.html", "templates/"+page+".html")
+		if err != nil {
+			return nil, err
+		}
+		u.pages[page] = t
+	}
 	if err := os.MkdirAll(coverDir, 0o700); err != nil {
 		return nil, err
 	}
@@ -89,7 +102,8 @@ func (u *UI) Routes(mux *http.ServeMux) {
 	mux.Handle("GET /shelf", family(u.shelf))
 	mux.Handle("POST /books/{asin}/shelf", family(u.shelfOne(true)))
 	mux.Handle("POST /books/{asin}/unshelf", family(u.shelfOne(false)))
-	mux.Handle("GET /cover/{asin}", family(u.covers.serve))
+	// Covers are for anyone signed in, admins included.
+	mux.HandleFunc("GET /cover/{asin}", u.covers.serve)
 }
 
 // StaticHandler serves CSS and htmx. They need no login.

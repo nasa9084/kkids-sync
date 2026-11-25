@@ -44,6 +44,7 @@ func setup(t *testing.T) (http.Handler, func(email string) http.Handler) {
 	}
 	mux := http.NewServeMux()
 	ui.Routes(mux)
+	ui.AdminRoutes(mux, db)
 	as := func(email string) http.Handler {
 		return auth.Middleware(auth.FixedEmail(email), db, log)(mux)
 	}
@@ -92,5 +93,46 @@ func TestPages(t *testing.T) {
 	}
 	if rec := do(mom, "GET", "/cover/not-an-asin", nil); rec.Code != 404 {
 		t.Errorf("bad cover asin: %d", rec.Code)
+	}
+}
+
+func TestAdminPages(t *testing.T) {
+	_, as := setup(t)
+	owner := as("owner@example.com")
+	mom := as("mom@example.com")
+
+	if rec := do(mom, "GET", "/admin/", nil); rec.Code != 403 {
+		t.Errorf("family on admin page: %d", rec.Code)
+	}
+	rec := do(owner, "GET", "/admin/?f=all", nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "港町ミステリー 2") {
+		t.Fatalf("admin books: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, p := range []string{"/admin/series", "/admin/jobs", "/admin/"} {
+		if rec := do(owner, "GET", p, nil); rec.Code != 200 {
+			t.Errorf("%s: %d", p, rec.Code)
+		}
+	}
+
+	req := httptest.NewRequest("POST", "/admin/books/B000000002/visibility", strings.NewReader("v=0"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://example.com")
+	rec = httptest.NewRecorder()
+	owner.ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `class="off"`) {
+		t.Errorf("hide book: %d %s", rec.Code, rec.Body.String())
+	}
+	// Mom can no longer see it.
+	if rec := do(mom, "GET", "/?q=港町", nil); strings.Contains(rec.Body.String(), "港町ミステリー 2") {
+		t.Error("hidden book still visible to family")
+	}
+
+	req = httptest.NewRequest("POST", "/admin/books/B000000002/visibility", strings.NewReader("v=1"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://evil.example")
+	rec = httptest.NewRecorder()
+	owner.ServeHTTP(rec, req)
+	if rec.Code != 403 {
+		t.Errorf("cross-site admin post: %d", rec.Code)
 	}
 }

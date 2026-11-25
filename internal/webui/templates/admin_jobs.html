@@ -1,0 +1,17 @@
+{{define "content"}}
+<section class="panel">
+  <h2>ジョブ履歴</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>開始</th><th>種類</th><th>結果</th><th>内容</th></tr></thead>
+    <tbody>
+    {{range .Jobs}}
+    <tr><td>{{fmtTime .StartedAt}}</td><td>{{.Kind}}</td><td><span class="{{if eq .Result "ok"}}on{{else}}off{{end}}">{{.Result}}</span></td><td>{{.Detail}}</td></tr>
+    {{else}}
+    <tr><td colspan="4">まだありません</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  </div>
+</section>
+{{end}}

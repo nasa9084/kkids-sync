@@ -1,0 +1,50 @@
+{{define "content"}}
+<section class="cards">
+  <div class="card"><span class="label">ライブラリ</span><strong>{{.Overview.Books}}冊</strong><span class="label">シリーズ {{.Overview.Series}}・未設定 {{.Overview.Unset}}冊</span></div>
+  <div class="card"><span class="label">次の反映</span><strong>追加 {{.Overview.ToAdd}} / 削除 {{.Overview.ToRemove}}</strong><span class="label">家族の選択と共有状態の差</span></div>
+  <div class="card"><span class="label">最後の同期</span>
+    {{with .Overview.LastSync}}<strong>{{fmtTime .StartedAt}}</strong><span class="label">{{.Detail}}</span>{{else}}<strong>まだ</strong>{{end}}
+  </div>
+  <div class="card"><span class="label">未設定の本の扱い</span>
+    <form method="post" action="/admin/settings/default" class="inline">
+      <select name="v" aria-label="全体の既定">
+        <option value="0" {{if not .Overview.DefaultShown}}selected{{end}}>非公開</option>
+        <option value="1" {{if .Overview.DefaultShown}}selected{{end}}>公開</option>
+      </select>
+      <button type="submit">保存</button>
+    </form>
+  </div>
+</section>
+
+{{with .Overview.Outside}}
+<section class="panel">
+  <h2>ライブラリにない共有</h2>
+  <p class="label">Kindle Unlimitedの本などです。自動では外しません。</p>
+  <ul>{{range .}}<li>{{.Member}}: <a href="https://www.amazon.co.jp/dp/{{.ASIN}}" rel="noreferrer" target="_blank">{{.ASIN}}</a></li>{{end}}</ul>
+</section>
+{{end}}
+
+<section class="panel">
+  <div class="toolbar">
+    <h2>本の公開設定</h2>
+    <nav class="filters" aria-label="絞り込み">
+      {{range .Filters}}<a href="{{.URL}}" {{if .Current}}aria-current="true"{{end}}>{{.Label}}</a>{{end}}
+    </nav>
+    <form method="get" action="/admin/" class="inline">
+      <input type="hidden" name="f" value="{{.Filter}}">
+      <input type="search" name="q" value="{{.Query}}" placeholder="書名・シリーズ名" aria-label="書名・シリーズ名で絞り込み">
+      <button type="submit">絞り込む</button>
+    </form>
+  </div>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>書名</th><th>シリーズ・巻</th><th>この本の設定</th><th>見え方</th><th class="num">共有中</th></tr></thead>
+    <tbody>{{range .Books}}{{template "book-row" .}}{{else}}<tr><td colspan="5">該当する本はありません</td></tr>{{end}}</tbody>
+  </table>
+  </div>
+  <div class="pager">
+    {{if .PrevURL}}<a href="{{.PrevURL}}">← 前へ</a>{{else}}<span></span>{{end}}
+    {{if .NextURL}}<a href="{{.NextURL}}">次へ →</a>{{end}}
+  </div>
+</section>
+{{end}}

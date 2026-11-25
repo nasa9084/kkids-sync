@@ -1,0 +1,18 @@
+{{define "content"}}
+<section class="panel">
+  <div class="toolbar">
+    <h2>シリーズ</h2>
+    <p class="label">「新刊の既定」は、そのシリーズで本ごとの設定がない本(新しく買った巻を含む)に効きます。</p>
+    <form method="get" action="/admin/series" class="inline">
+      <input type="search" name="q" value="{{.Query}}" placeholder="シリーズ名" aria-label="シリーズ名で絞り込み">
+      <button type="submit">絞り込む</button>
+    </form>
+  </div>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>シリーズ</th><th class="num">冊数</th><th>新刊の既定</th></tr></thead>
+    <tbody>{{range .Series}}{{template "series-row" .}}{{else}}<tr><td colspan="3">シリーズはありません</td></tr>{{end}}</tbody>
+  </table>
+  </div>
+</section>
+{{end}}

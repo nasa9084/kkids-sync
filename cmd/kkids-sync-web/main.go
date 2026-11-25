@@ -128,10 +128,7 @@ func serve(ctx context.Context, log *slog.Logger, db *store.Store) error {
 	}
 	app := http.NewServeMux()
 	ui.Routes(app)
-	app.Handle("GET /admin/{$}", auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		io.WriteString(w, "ほんだな 管理\n")
-	})))
+	ui.AdminRoutes(app, db)
 	mux.Handle("/", auth.Middleware(verifier, db, log)(app))
 
 	servers := []*http.Server{{
