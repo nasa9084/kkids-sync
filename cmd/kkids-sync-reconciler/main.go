@@ -22,10 +22,14 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/nasa9084/kkids-sync/internal/amazon"
 	"github.com/nasa9084/kkids-sync/internal/internalapi"
 )
+
+// headless is set by -headless for every browser this command opens.
+var headless bool
 
 func main() {
 	state := flag.String("state", "storage-state.json", "Amazon session file (contains cookies; keep it secret)")
@@ -34,8 +38,11 @@ func main() {
 	full := flag.Bool("full", false, "sync: scroll through the whole library instead of stopping at books already in -out")
 	web := flag.String("web", "", "kkids-sync-web internal API base URL, e.g. http://kkids-sync-web:8081")
 	maxChanges := flag.Int("max-changes", 50, "apply: refuse plans with more changes than this")
+	flag.BoolVar(&headless, "headless", false, "run Chromium without a window (by default it needs a display, e.g. xvfb-run)")
+	syncEvery := flag.Duration("sync-every", 24*time.Hour, "run: sync the library when the snapshot in -out is older than this")
+	jitter := flag.Duration("jitter", 0, "run: wait a random time up to this before starting")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: kkids-sync-reconciler [flags] login|sync|link-profiles|plan|apply\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: kkids-sync-reconciler [flags] login|sync|link-profiles|plan|apply|run\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -69,10 +76,13 @@ func main() {
 	case "plan":
 		err = showPlan(ctx, client)
 	case "apply":
-		err = apply(ctx, log, client, *state, *maxChanges)
-		if err == nil {
+		var res applyResult
+		err = apply(ctx, log, client, *state, *maxChanges, &res)
+		if err == nil && res.changed > 0 {
 			err = syncLibrary(ctx, log, *state, *out, *maxPages, false, client)
 		}
+	case "run":
+		err = run(ctx, log, client, *state, *out, *maxPages, *maxChanges, *syncEvery, *jitter)
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -89,8 +99,34 @@ func main() {
 	}
 }
 
+// run is what the scheduled job does: sync the library first if the
+// snapshot in -out is missing or older than syncEvery, apply the plan, and
+// sync again if apply changed something. With nothing to do it does not start
+// a browser. Syncing first means the very first run fills web even though
+// the plan is then refused as too large (nobody has selected anything yet).
+func run(ctx context.Context, log *slog.Logger, client *internalapi.Client, state, out string, maxPages, maxChanges int, syncEvery, jitter time.Duration) error {
+	if jitter > 0 {
+		if err := amazon.Sleep(ctx, 0, jitter); err != nil {
+			return err
+		}
+	}
+	if fi, err := os.Stat(out); err != nil || time.Since(fi.ModTime()) > syncEvery {
+		if err := syncLibrary(ctx, log, state, out, maxPages, false, client); err != nil {
+			return err
+		}
+	}
+	var res applyResult
+	if err := apply(ctx, log, client, state, maxChanges, &res); err != nil {
+		return err
+	}
+	if res.changed == 0 {
+		return nil
+	}
+	return syncLibrary(ctx, log, state, out, maxPages, false, client)
+}
+
 func login(log *slog.Logger, state string) (err error) {
-	s, err := amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, Logger: log})
+	s, err := amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, Logger: log, Headless: headless})
 	if err != nil {
 		return err
 	}
@@ -105,7 +141,7 @@ func syncLibrary(ctx context.Context, log *slog.Logger, state, out string, maxPa
 	if _, err := os.Stat(state); err != nil {
 		return fmt.Errorf("%w: no session file at %s (run login first)", amazon.ErrSignedOut, state)
 	}
-	s, err := amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, Logger: log})
+	s, err := amazon.Open(amazon.Options{StatePath: state, ReadOnly: true, Logger: log, Headless: headless})
 	if err != nil {
 		return err
 	}
