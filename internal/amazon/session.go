@@ -392,9 +392,31 @@ func (s *Session) scrollToEnd(ctx context.Context) error {
 	return err
 }
 
+// onDashboard reports whether the page is on the parent dashboard and the
+// browser holds an Amazon sign-in cookie. The host alone is not enough:
+// without a session, parents.amazon.co.jp shows a public landing page.
 func (s *Session) onDashboard() bool {
 	u, err := url.Parse(s.page.URL())
-	return err == nil && u.Hostname() == "parents.amazon.co.jp"
+	if err != nil || u.Hostname() != "parents.amazon.co.jp" {
+		return false
+	}
+	cookies, err := s.ctx.Cookies("https://www.amazon.co.jp/", dashboardURL)
+	if err != nil {
+		return false
+	}
+	return hasSignInCookie(cookies)
+}
+
+// signInCookies are set on .amazon.co.jp only while signed in.
+var signInCookies = map[string]bool{"at-acbjp": true, "sess-at-acbjp": true, "x-acbjp": true}
+
+func hasSignInCookie(cookies []playwright.Cookie) bool {
+	for _, c := range cookies {
+		if signInCookies[c.Name] && c.Value != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Sleep waits a random duration between min and max, or until ctx ends.
