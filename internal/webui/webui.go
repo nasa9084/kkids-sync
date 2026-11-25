@@ -79,7 +79,7 @@ func New(db Store, coverDir string, log *slog.Logger) (*UI, error) {
 		"deref":   func(b *bool) bool { return b != nil && *b },
 		"fmtTime": func(t time.Time) string { return t.In(jst).Format("1/2 15:04") },
 	}
-	for _, page := range []string{"admin_books", "admin_series", "admin_jobs"} {
+	for _, page := range []string{"admin_books", "admin_series", "admin_jobs", "admin_shelves"} {
 		t, err := template.New(page).Funcs(adminFuncs).ParseFS(templateFS, "templates/admin_layout.html", "templates/"+page+".html")
 		if err != nil {
 			return nil, err

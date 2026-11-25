@@ -2,13 +2,16 @@ package store
 
 import (
 	"context"
-
-	"github.com/nasa9084/kkids-sync/internal/titles"
 )
 
-// assignSeries gives every book without a series one, when its title has a
-// volume number. Series are created on first use.
+// assignSeries gives every book without a series one: by the owner's rules
+// first, else when its title has a volume number. Series are created on
+// first use.
 func (s *Store) assignSeries(ctx context.Context, q execQuerier) error {
+	rules, err := s.seriesRules(ctx, q)
+	if err != nil {
+		return err
+	}
 	rows, err := q.QueryContext(ctx, `SELECT asin, title FROM books WHERE series_id IS NULL AND COALESCE(series_index, 0) <> -1`)
 	if err != nil {
 		return err
@@ -24,7 +27,7 @@ func (s *Store) assignSeries(ctx context.Context, q execQuerier) error {
 			rows.Close()
 			return err
 		}
-		if name, vol, ok := titles.ParseSeries(title); ok {
+		if name, vol, ok := assignWithRules(rules, title); ok {
 			todo = append(todo, pending{asin, name, vol})
 		}
 	}

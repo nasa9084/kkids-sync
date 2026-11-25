@@ -22,6 +22,13 @@ type AdminStore interface {
 	SetSeriesDefault(ctx context.Context, id int64, v *bool) error
 	SetDefaultVisible(ctx context.Context, v bool) error
 	Jobs(ctx context.Context, limit int) ([]store.Job, error)
+	ShelfSummaries(ctx context.Context) ([]store.ShelfSummary, error)
+	MemberShelf(ctx context.Context, memberID int64, state store.ShelfState, query string, limit, offset int) ([]store.ShelfRow, error)
+	SeriesRules(ctx context.Context) ([]store.SeriesRule, error)
+	PreviewRule(ctx context.Context, r store.SeriesRule) ([]store.RuleMatch, error)
+	AddRule(ctx context.Context, r store.SeriesRule) (int, error)
+	DeleteRule(ctx context.Context, id int64) error
+	RenameSeries(ctx context.Context, id int64, name string) error
 }
 
 type filterLink struct {
@@ -39,6 +46,19 @@ type adminData struct {
 	Series            []store.SeriesRow
 	Jobs              []store.Job
 	PrevURL, NextURL  string
+	// shelves page
+	Shelves []store.ShelfSummary
+	Shelf   []store.ShelfRow
+	ShelfOf store.ShelfSummary
+	States  []filterLink
+	// series page
+	Rules            []store.SeriesRule
+	RulePattern      string
+	RuleSeries       string
+	RuleError        string
+	Preview          []store.RuleMatch
+	Previewed, Moved bool
+	MovedCount       int
 }
 
 // AdminRoutes registers the admin pages on mux. Requests must already have
@@ -61,6 +81,10 @@ func (u *UI) AdminRoutes(mux *http.ServeMux, db AdminStore) {
 	mux.Handle("POST /admin/series/{id}/default", guard(a.seriesDefault))
 	mux.Handle("POST /admin/settings/default", guard(a.globalDefault))
 	mux.Handle("GET /admin/jobs", guard(a.jobs))
+	mux.Handle("GET /admin/shelves", guard(a.shelves))
+	mux.Handle("POST /admin/series/{id}/name", guard(a.seriesRename))
+	mux.Handle("POST /admin/series/rules", guard(a.ruleAdd))
+	mux.Handle("POST /admin/series/rules/{id}/delete", guard(a.ruleDelete))
 }
 
 type admin struct {
@@ -194,7 +218,168 @@ func (a *admin) series(w http.ResponseWriter, r *http.Request) {
 		a.ui.fail(w, err)
 		return
 	}
-	a.render(w, "admin_series", adminData{Title: "シリーズ", Nav: "series", Query: q, Member: m, Series: rows})
+	rules, err := a.db.SeriesRules(r.Context())
+	if err != nil {
+		a.ui.fail(w, err)
+		return
+	}
+	d := adminData{Title: "シリーズ", Nav: "series", Query: q, Member: m, Series: rows, Rules: rules}
+	if n := r.URL.Query().Get("moved"); n != "" {
+		d.Moved = true
+		d.MovedCount, _ = strconv.Atoi(n)
+	}
+	a.render(w, "admin_series", d)
+}
+
+// ruleAdd previews a rule (preview=1) or saves and applies it.
+func (a *admin) ruleAdd(w http.ResponseWriter, r *http.Request) {
+	m, _ := auth.MemberFrom(r.Context())
+	d := adminData{Title: "シリーズ", Nav: "series", Member: m,
+		RulePattern: r.FormValue("pattern"), RuleSeries: r.FormValue("series")}
+	fill := func() bool {
+		var err error
+		if d.Series, err = a.db.SeriesList(r.Context(), ""); err != nil {
+			a.ui.fail(w, err)
+			return false
+		}
+		if d.Rules, err = a.db.SeriesRules(r.Context()); err != nil {
+			a.ui.fail(w, err)
+			return false
+		}
+		return true
+	}
+	rule, err := store.CompileRule(d.RulePattern, d.RuleSeries)
+	if err != nil {
+		d.RuleError = err.Error()
+		if fill() {
+			a.render(w, "admin_series", d)
+		}
+		return
+	}
+	if r.FormValue("preview") == "1" {
+		if d.Preview, err = a.db.PreviewRule(r.Context(), rule); err != nil {
+			a.ui.fail(w, err)
+			return
+		}
+		d.Previewed = true
+		if fill() {
+			a.render(w, "admin_series", d)
+		}
+		return
+	}
+	n, err := a.db.AddRule(r.Context(), rule)
+	if err != nil {
+		a.ui.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/series?moved="+strconv.Itoa(n)+"#rules", http.StatusSeeOther)
+}
+
+func (a *admin) ruleDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if err := a.db.DeleteRule(r.Context(), id); err != nil {
+		a.ui.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/series#rules", http.StatusSeeOther)
+}
+
+func (a *admin) seriesRename(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" {
+		http.Error(w, "シリーズ名を入れてください", http.StatusBadRequest)
+		return
+	}
+	if err := a.db.RenameSeries(r.Context(), id, name); err != nil {
+		a.ui.fail(w, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/series?q="+url.QueryEscape(name), http.StatusSeeOther)
+}
+
+var shelfStates = []struct {
+	s     store.ShelfState
+	label string
+}{
+	{store.ShelfAny, "すべて"},
+	{store.ShelfToAdd, "追加待ち"},
+	{store.ShelfToRemove, "削除待ち"},
+	{store.ShelfHeld, "非公開で保留"},
+	{store.ShelfShared, "共有中"},
+}
+
+func shelfURL(member int64, st store.ShelfState, q string, page int) string {
+	v := url.Values{}
+	v.Set("m", strconv.FormatInt(member, 10))
+	if st != store.ShelfAny {
+		v.Set("s", string(st))
+	}
+	if q != "" {
+		v.Set("q", q)
+	}
+	if page > 0 {
+		v.Set("page", strconv.Itoa(page))
+	}
+	return "/admin/shelves?" + v.Encode()
+}
+
+func (a *admin) shelves(w http.ResponseWriter, r *http.Request) {
+	m, _ := auth.MemberFrom(r.Context())
+	sums, err := a.db.ShelfSummaries(r.Context())
+	if err != nil {
+		a.ui.fail(w, err)
+		return
+	}
+	d := adminData{Title: "本棚", Nav: "shelves", Member: m, Shelves: sums}
+	if len(sums) == 0 {
+		a.render(w, "admin_shelves", d)
+		return
+	}
+	id, _ := strconv.ParseInt(r.URL.Query().Get("m"), 10, 64)
+	d.ShelfOf = sums[0]
+	for _, s := range sums {
+		if s.Member.ID == id {
+			d.ShelfOf = s
+		}
+	}
+	st := store.ShelfState(r.URL.Query().Get("s"))
+	valid := false
+	for _, x := range shelfStates {
+		valid = valid || x.s == st
+	}
+	if !valid {
+		st = store.ShelfAny
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	d.Query = q
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	page = max(page, 0)
+	for _, x := range shelfStates {
+		d.States = append(d.States, filterLink{Label: x.label, URL: shelfURL(d.ShelfOf.Member.ID, x.s, q, 0), Current: x.s == st})
+	}
+	rows, err := a.db.MemberShelf(r.Context(), d.ShelfOf.Member.ID, st, q, pageSize, page*pageSize)
+	if err != nil {
+		a.ui.fail(w, err)
+		return
+	}
+	if len(rows) > pageSize {
+		rows = rows[:pageSize]
+		d.NextURL = shelfURL(d.ShelfOf.Member.ID, st, q, page+1)
+	}
+	if page > 0 {
+		d.PrevURL = shelfURL(d.ShelfOf.Member.ID, st, q, page-1)
+	}
+	d.Shelf = rows
+	a.render(w, "admin_shelves", d)
 }
 
 func (a *admin) seriesDefault(w http.ResponseWriter, r *http.Request) {
