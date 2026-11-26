@@ -335,14 +335,19 @@ var shelfStates = []struct {
 	{store.ShelfShared, "共有中"},
 }
 
-// viewAsStart lets the admin look at a family member's pages (read-only).
+// viewAsStart lets the admin look at a family member's pages, read-only or
+// (act=1) changing their shelf for them.
 func (a *admin) viewAsStart(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if _, err := strconv.ParseInt(id, 10, 64); err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: viewAsCookie, Value: id, Path: "/", HttpOnly: true,
+	value := id
+	if r.FormValue("act") == "1" {
+		value += ":act"
+	}
+	http.SetCookie(w, &http.Cookie{Name: viewAsCookie, Value: value, Path: "/", HttpOnly: true,
 		Secure: r.Header.Get("X-Forwarded-Proto") == "https" || r.TLS != nil, SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

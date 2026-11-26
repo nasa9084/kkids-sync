@@ -263,3 +263,29 @@ func TestSeriesList(t *testing.T) {
 		t.Errorf("sort=new: %d", rec.Code)
 	}
 }
+
+func TestAdminActAs(t *testing.T) {
+	_, as := setup(t)
+	owner := as("owner@example.com")
+	mom := as("mom@example.com")
+	rec := do(owner, "POST", "/admin/view-as/1?act=1", map[string]string{"Origin": "http://example.com"})
+	if rec.Code != 303 {
+		t.Fatalf("act-as: %d", rec.Code)
+	}
+	c := rec.Result().Cookies()[0]
+	hdr := map[string]string{"Cookie": c.Name + "=" + c.Value, "Origin": "http://example.com"}
+	if rec := do(owner, "GET", "/shelf", hdr); !strings.Contains(rec.Body.String(), "母さんの代わりに操作しています") || strings.Contains(rec.Body.String(), "viewing-mode") {
+		t.Fatalf("act-as banner: %s", rec.Body.String())
+	}
+	if rec := do(owner, "POST", "/series/1/shelf-all", hdr); rec.Code != 303 {
+		t.Fatalf("act-as post: %d %s", rec.Code, rec.Body.String())
+	}
+	// The change is on mom's shelf.
+	if rec := do(mom, "GET", "/shelf", nil); !strings.Contains(rec.Body.String(), "港町ミステリー 2") {
+		t.Errorf("mom's shelf: %s", rec.Body.String())
+	}
+	// A forged act cookie value from a family member does nothing.
+	if rec := do(mom, "GET", "/shelf", map[string]string{"Cookie": viewAsCookie + "=2:act"}); strings.Contains(rec.Body.String(), "代わりに操作") {
+		t.Error("family member honoured the cookie")
+	}
+}
