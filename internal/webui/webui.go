@@ -128,11 +128,25 @@ const viewAsCookie = "hondana_view_as"
 
 type viewingKey struct{}
 
-// viewing reports whether an admin is looking at a family member's pages.
-func viewing(ctx context.Context) bool {
-	v, _ := ctx.Value(viewingKey{}).(bool)
+// viewMode is how an admin is using a family member's pages.
+type viewMode int
+
+const (
+	notViewing viewMode = iota
+	viewOnly            // look only
+	actAs               // change their shelf for them
+)
+
+func modeOf(ctx context.Context) viewMode {
+	v, _ := ctx.Value(viewingKey{}).(viewMode)
 	return v
 }
+
+// viewing reports whether an admin is looking at a family member's pages.
+func viewing(ctx context.Context) bool { return modeOf(ctx) != notViewing }
+
+// acting reports whether the admin may change that member's shelf.
+func acting(ctx context.Context) bool { return modeOf(ctx) == actAs }
 
 // familyOnly sends admins to their own page and stops cross-site posts. An
 // admin who chose "view as" on the admin page sees that member's pages,
@@ -145,16 +159,16 @@ func (u *UI) familyOnly(next http.HandlerFunc) http.Handler {
 			return
 		}
 		if m.Role != store.RoleFamily {
-			as, ok := u.viewAs(r)
+			as, mode, ok := u.viewAs(r)
 			if !ok {
 				http.Redirect(w, r, "/admin/", http.StatusSeeOther)
 				return
 			}
-			if r.Method != http.MethodGet {
+			if r.Method != http.MethodGet && mode != actAs {
 				http.Error(w, "見るだけのモードなので、本棚は変えられません", http.StatusForbidden)
 				return
 			}
-			ctx := context.WithValue(auth.WithMember(r.Context(), as), viewingKey{}, true)
+			ctx := context.WithValue(auth.WithMember(r.Context(), as), viewingKey{}, mode)
 			next(w, r.WithContext(ctx))
 			return
 		}
@@ -166,21 +180,26 @@ func (u *UI) familyOnly(next http.HandlerFunc) http.Handler {
 	})
 }
 
-// viewAs returns the family member named by the admin's view-as cookie.
-func (u *UI) viewAs(r *http.Request) (store.Member, bool) {
+// viewAs returns the family member named by the admin's view-as cookie
+// ("<id>" to look, "<id>:act" to change their shelf).
+func (u *UI) viewAs(r *http.Request) (store.Member, viewMode, bool) {
 	c, err := r.Cookie(viewAsCookie)
 	if err != nil {
-		return store.Member{}, false
+		return store.Member{}, notViewing, false
 	}
-	id, err := strconv.ParseInt(c.Value, 10, 64)
+	v, mode := c.Value, viewOnly
+	if before, ok := strings.CutSuffix(v, ":act"); ok {
+		v, mode = before, actAs
+	}
+	id, err := strconv.ParseInt(v, 10, 64)
 	if err != nil {
-		return store.Member{}, false
+		return store.Member{}, notViewing, false
 	}
 	m, err := u.db.MemberByID(r.Context(), id)
 	if err != nil || m.Role != store.RoleFamily {
-		return store.Member{}, false
+		return store.Member{}, notViewing, false
 	}
-	return m, true
+	return m, mode, true
 }
 
 // sameOrigin rejects posts from other sites. Browsers send Origin on POST.
@@ -196,6 +215,7 @@ func sameOrigin(r *http.Request) bool {
 type pageData struct {
 	Title, Nav, Query string
 	Viewing           bool // an admin looking through "view as"
+	Acting            bool // ... and allowed to change the shelf
 	Member            store.Member
 	Books             []store.BookView
 	PrevURL, NextURL  string
@@ -237,7 +257,7 @@ func (u *UI) search(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, err)
 		return
 	}
-	d := pageData{Title: "本をさがす", Nav: "search", Query: q, Member: m, Viewing: viewing(r.Context())}
+	d := pageData{Title: "本をさがす", Nav: "search", Query: q, Member: m, Viewing: viewing(r.Context()), Acting: acting(r.Context())}
 	if len(books) > pageSize {
 		books = books[:pageSize]
 		d.NextURL = pageURL(q, page+1)
@@ -279,7 +299,7 @@ func (u *UI) series(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	d := pageData{Title: books[0].SeriesName, Nav: "series", Member: m, Books: books, SeriesID: id, Viewing: viewing(r.Context())}
+	d := pageData{Title: books[0].SeriesName, Nav: "series", Member: m, Books: books, SeriesID: id, Viewing: viewing(r.Context()), Acting: acting(r.Context())}
 	// "Next" means the volumes after the last one on the shelf.
 	last := -1
 	for i, b := range books {
@@ -332,7 +352,7 @@ func (u *UI) seriesList(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, err)
 		return
 	}
-	d := pageData{Title: "シリーズ", Nav: "series", Query: q, Member: m, ByNew: byNew, Viewing: viewing(r.Context())}
+	d := pageData{Title: "シリーズ", Nav: "series", Query: q, Member: m, ByNew: byNew, Viewing: viewing(r.Context()), Acting: acting(r.Context())}
 	link := func(p int) string {
 		v := url.Values{}
 		if q != "" {
@@ -432,7 +452,7 @@ func (u *UI) shelf(w http.ResponseWriter, r *http.Request) {
 		u.fail(w, err)
 		return
 	}
-	d := pageData{Title: "わたしの本棚", Nav: "shelf", Member: m, Viewing: viewing(r.Context())}
+	d := pageData{Title: "わたしの本棚", Nav: "shelf", Member: m, Viewing: viewing(r.Context()), Acting: acting(r.Context())}
 	if d.Total, d.Pending, err = u.db.ShelfCounts(r.Context(), m.ID); err != nil {
 		u.fail(w, err)
 		return

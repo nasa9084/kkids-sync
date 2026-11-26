@@ -64,3 +64,4 @@ body.viewing-mode main button { pointer-events: none; opacity: .45; }
 .sort a[aria-current] { background: #1E2422; color: #fff; border-color: #1E2422; }
 a.series-card { text-decoration: none; color: inherit; }
 .series-card .chev { font-size: 28px; color: var(--quiet); align-self: center; padding: 0 4px; }
+.viewing.acting { background: #8A3B12; }

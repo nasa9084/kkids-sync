@@ -7,8 +7,8 @@
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/htmx.min.js" defer></script>
 </head>
-<body hx-headers='{"X-Requested-By": "hondana"}'{{if .Viewing}} class="viewing-mode"{{end}}>
-{{if .Viewing}}<div class="viewing">{{.Member.Name}}さんの画面を見ています(見るだけ・変更はできません)<a href="/admin/view-as/end">管理画面に戻る</a></div>{{end}}
+<body hx-headers='{"X-Requested-By": "hondana"}'{{if and .Viewing (not .Acting)}} class="viewing-mode"{{end}}>
+{{if .Acting}}<div class="viewing acting">{{.Member.Name}}さんの代わりに操作しています(本棚の変更は{{.Member.Name}}さんの本棚に入ります)<a href="/admin/view-as/end">管理画面に戻る</a></div>{{else if .Viewing}}<div class="viewing">{{.Member.Name}}さんの画面を見ています(見るだけ・変更はできません)<a href="/admin/view-as/end">管理画面に戻る</a></div>{{end}}
 <div class="page">
 <header class="top">
   <span class="brand">ほんだな</span>
