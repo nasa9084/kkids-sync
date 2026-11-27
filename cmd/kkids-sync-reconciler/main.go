@@ -30,6 +30,10 @@ import (
 // headless is set by -headless for every browser this command opens.
 var headless bool
 
+// removalsPerRun and removalsPerDay pace removals per profile, so that an
+// emptied shelf is taken apart slowly over days.
+var removalsPerRun, removalsPerDay int
+
 func main() {
 	state := flag.String("state", "storage-state.json", "Amazon session file (contains cookies; keep it secret)")
 	out := flag.String("out", "snapshot.json", "sync: where to write the snapshot")
@@ -37,6 +41,8 @@ func main() {
 	full := flag.Bool("full", false, "sync: scroll through the whole library instead of stopping at books already in -out")
 	web := flag.String("web", "", "kkids-sync-web internal API base URL, e.g. http://kkids-sync-web:8081")
 	maxChanges := flag.Int("max-changes", 50, "apply: make at most this many changes per run (removals first); the rest follow on later runs")
+	flag.IntVar(&removalsPerRun, "max-removals-per-run", 0, "apply: remove at most this many books per profile per run (0: no limit)")
+	flag.IntVar(&removalsPerDay, "max-removals-per-day", 0, "apply: remove at most this many books per profile in any 24 hours (0: no limit)")
 	flag.BoolVar(&headless, "headless", false, "run Chromium without a window (by default it needs a display, e.g. xvfb-run)")
 	syncEvery := flag.Duration("sync-every", 24*time.Hour, "run: sync the library when the snapshot in -out is older than this")
 	jitter := flag.Duration("jitter", 0, "run: wait a random time up to this before starting")

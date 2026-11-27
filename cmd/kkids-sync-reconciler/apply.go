@@ -89,8 +89,9 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 		log.Info("changes held after earlier failures", "held", held)
 	}
 	plan, slow := bo.limitUnsearchable(plan, listFallbacks)
+	plan, paced := bo.paceRemovals(plan, removalsPerRun, removalsPerDay, time.Now())
 	plan, total, deferred := limitPlan(plan, maxChanges)
-	deferred += slow
+	deferred += slow + paced
 	if total == 0 {
 		log.Info("nothing to apply", "held", held)
 		return nil
@@ -156,6 +157,9 @@ func apply(ctx context.Context, log *slog.Logger, client *internalapi.Client, st
 			case changed:
 				done++
 				bo.succeeded(profile, step.asin)
+				if !step.add {
+					bo.removed(profile, time.Now())
+				}
 				log.Info("toggled", "profile", shortID(profile), "asin", step.asin, "add", step.add)
 			default:
 				skipped++
