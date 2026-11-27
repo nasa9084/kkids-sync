@@ -1,3 +1,4 @@
+:root { color-scheme: light; }
 * { box-sizing: border-box; }
 body { margin: 0; background: #F5F6F4; color: #1E2422; font-family: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif; font-size: 14px; line-height: 1.5; }
 a { color: #0F5F5A; }
@@ -15,7 +16,8 @@ header nav a[aria-current], .filters a[aria-current] { background: #1E2422; colo
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 .filters { display: flex; flex-wrap: wrap; gap: 6px; }
 form.inline { display: flex; gap: 6px; align-items: center; }
-input, select, button { font: inherit; }
+input, select, button { font: inherit; color: #1E2422; }
+button { -webkit-appearance: none; appearance: none; }
 input[type=search], input[name=name] { height: 34px; padding: 0 10px; border: 1px solid #C9CFCB; border-radius: 8px; }
 input.num { width: 64px; height: 34px; padding: 0 6px; border: 1px solid #C9CFCB; border-radius: 8px; }
 select { height: 34px; border: 1px solid #C9CFCB; border-radius: 8px; background: #fff; padding: 0 6px; }
