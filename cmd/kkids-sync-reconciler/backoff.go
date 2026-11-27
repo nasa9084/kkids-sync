@@ -22,6 +22,51 @@ type backoff struct {
 	// Unsearchable holds ASINs the dashboard's search never returned (e.g.
 	// 【連載版】 single episodes). They go straight to the list fallback.
 	Unsearchable map[string]bool `json:"unsearchable"`
+	// Removed holds when books were removed, per profile, for the
+	// removal pace (-max-removals-per-day).
+	Removed map[string][]time.Time `json:"removed,omitempty"`
+}
+
+// removed records that a book was removed from profile.
+func (b *backoff) removed(profile string, now time.Time) {
+	if b.Removed == nil {
+		b.Removed = map[string][]time.Time{}
+	}
+	b.Removed[profile] = append(b.Removed[profile], now)
+}
+
+// paceRemovals trims every profile's removals to perRun, and to what is
+// left of perDay in the last 24 hours (0 means no limit). It returns the
+// trimmed plan and how many removals wait for later runs.
+func (b *backoff) paceRemovals(plan map[string]store.Diff, perRun, perDay int, now time.Time) (map[string]store.Diff, int) {
+	for p, ts := range b.Removed {
+		var keep []time.Time
+		for _, t := range ts {
+			if now.Sub(t) < 24*time.Hour {
+				keep = append(keep, t)
+			}
+		}
+		if len(keep) == 0 {
+			delete(b.Removed, p)
+		} else {
+			b.Removed[p] = keep
+		}
+	}
+	waiting := 0
+	out := make(map[string]store.Diff, len(plan))
+	for p, d := range plan {
+		allowed := len(d.Remove)
+		if perRun > 0 {
+			allowed = min(allowed, perRun)
+		}
+		if perDay > 0 {
+			allowed = min(allowed, max(0, perDay-len(b.Removed[p])))
+		}
+		waiting += len(d.Remove) - allowed
+		d.Remove = d.Remove[:allowed:allowed]
+		out[p] = d
+	}
+	return out, waiting
 }
 
 type backoffEntry struct {
