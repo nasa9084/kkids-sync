@@ -1,0 +1,71 @@
+# Tags a new release from the head of main and builds its images.
+# Run it from the Actions tab (or `gh workflow run release.yml -f bump=patch`).
+# A tag pushed with GITHUB_TOKEN does not start other workflows, so this
+# starts the images workflow for the new tag itself.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the latest version to raise
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Exact version instead (e.g. 0.2.0; leave empty to bump)
+        type: string
+        required: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency: release
+
+jobs:
+  tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VERSION" ]; then
+            next="${VERSION#v}"
+          else
+            latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)"
+            latest="${latest:-v0.0.0}"
+            IFS=. read -r major minor patch <<<"${latest#v}"
+            case "$BUMP" in
+              major) next="$((major + 1)).0.0" ;;
+              minor) next="${major}.$((minor + 1)).0" ;;
+              *)     next="${major}.${minor}.$((patch + 1))" ;;
+            esac
+          fi
+          if ! [[ "$next" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::not a version: $next"; exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$next" >/dev/null; then
+            echo "::error::v$next already exists"; exit 1
+          fi
+          echo "tag=v$next" >>"$GITHUB_OUTPUT"
+      - name: Push the tag
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+      - name: Build the images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          gh workflow run images.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          echo "### Released $TAG ($(git rev-parse --short "$GITHUB_SHA"))" >>"$GITHUB_STEP_SUMMARY"
